@@ -1,0 +1,241 @@
+
+Links
+http://dotnetrocks.com/default.aspx?showNum=821
+http://net.tutsplus.com/tutorials/javascript-ajax/5-awesome-angularjs-features/
+https://github.com/angular/angularjs-batarang
+http://jsfiddle.net/lucassus/bpTXe/
+http://twitter.github.io/bootstrap/base-css.html
+http://bootswatch.com/default/
+http://msdn.microsoft.com/en-us/magazine/jj863129.aspx
+http://datajs.codeplex.com/
+https://github.com/borisyankov/DefinitelyTyped/tree/master/breeze
+http://www.rejetto.com/hfs/?f=dl
+http://www.breezejs.com/home
+http://www.initializr.com/
+http://jsfiddle.net/uBPyE/
+http://code.google.com/p/mongoose/
+http://www.nuget.org/packages/Microsoft.AspNet.WebApi.OData
+http://blog.tomaka17.com/2012/12/random-tricks-when-using-angularjs/
+https://github.com/zefhemel/persistencejs
+https://github.com/angular/angular-phonecat/tags
+http://todomvc.com/
+http://blogs.msdn.com/b/henrikn/archive/2012/06/01/using-nightly-asp-net-web-stack-nuget-packages-with-vs-2012-rc.aspx
+http://www.bennadel.com/blog/2433-Using-RESTful-Controllers-In-An-AngularJS-Resource.htm
+http://www.piotrwalat.net/using-typescript-with-angularjs-and-web-api/
+
+
+= AngularJS MTV Meetup: Best Practices =
+
+-[ng-cloak]
+-ng-bind
+-minification messes up js binding
+-dependency injection fuction arguments
+-don't minify angular.min.js, you can concatenate into single file though
+-"don't fight HTML, extend it"
+-don't develop against minified libraries
+-measure performance of your app, no absolute rules
+-Angular returns promise objects for async things, calls "apply" automatically when complete
+-Angular thinks it is in charge of changing DOM
+	-use ng-include to load partials instead of innerHTML to insert things
+
+
+All these custom tag formats valid:
+	<my-component>
+	<div my-component>
+	<div class="my-component">
+	<my:component>
+	<div x-my-component>
+	<div data-my-component>
+	<!-- directive:my-component -->
+-don't use "ng-" prefix please
+-need IE polyfils for JSON, etc
+
+Controllers
+-should not reference DOM, use directives
+-have behavior for view
+-what happens if user does X
+-where do I get X from?
+-new instance per rendering of view
+
+Services
+-should not references DOM (mostly, maybe for dialog boxes?)
+-are singleton
+-have logic independent of view > do X operation
+-have shared functions used by multiple controllers
+
+Directives
+-manipulate DOM
+
+Scope
+-treat as write-only in controllers
+-treat as read-only in view
+-is not model, has references to your model
+-don't bind directly to scope properties (ng-model), instead scope.model.property
+	-rule: if using "ng-model", there needs to be a dot in there somewhere
+-$watch function should be fast & idempotent (call it doesn't change value)
+-$parent
+-$root
+
+Modules
+-usually one module per application
+-one module per third-party reusable library
+-create modules based on features, but not usually necessary
+-maybe have modules to group portions for testing purposes
+-in the future modules may be able to be loaded incrementally > module per view, not per type
+
+Filters
+-can be expensive
+-can have watch on filter property and ng-repeat can use a secondary model
+
+Deployment
+-minify scripts
+-in general you may not get benefit from concatenating scripts
+-enable gzip on the server
+-make /index.html non-cachable so it can have version numbers for libraries & get current
+-angular has template cache service & module can be generated; useful if lots of little views
+-angular performances is relative to how many bindings on the page & speed of getter functions
+-ng-include & ng-view remove from redraw cycle, ng-show/ng-hide are always processed
+
+Events
+-events api on the scope as an app event bus to share information?
+-broadcast locations changes which can be cancelled in controller
+
+Upcoming
+-lazy loading javascript files
+-server-side pre-rendering
+-simplify directives api
+-animation
+
+= Writing Directives =
+-allow you to add capabilities to HTML (HTML6 :)
+-we have same access to system to build diretives as existing "ng" does
+-$injector is DI container
+-directive is glue between DOM and scope
+
+bootstrapping example
+-$compile looks for directives
+-linking phase attaches $compile to $rootScope then $apply
+
+-compile function and link function look the same except for repeaters
+-compile function only run once, link function run for each item in repeater
+-compile can modify template
+-linking binds scope to template
+-mostly you will use link function
+
+example:
+<div demo-greet='name' />
+myApp.directive('demoGreet', function($parse) {
+	return {
+		restrict:'AC', //Attribute, Class
+		link: function(scope, elm, attrs) {		
+			scope.$watch(attrs.demoGreet, function(name) {
+				elm.text('Hello ' + name + '!');
+			});
+			elm.bind('click', function() {
+				scope.$apply(function() {
+					$parse(attrs.demoGreet).assign(scope, 'abc');
+				});
+			});
+		}
+	}
+});
+
+Components:
+<profile email='email'></profile>
+
+myApp.directive('profile', function() {
+	return {
+		restrict: 'E', //Element
+		scope: {
+			email: '='
+		},
+		templateUrl: 'partials/profile.html',
+		link: function(scope) {
+			scope.leak = 'whoops';
+		}
+	};
+});
+
+<div class='profile'>
+	<h1>{{email}}</h1>
+</div>
+
+- { restrict: 'EACM' }
+-scope.$apply() tells view to redraw, things changed > needed in directives
+-apply gets you from outside Angular world to inside
+-$parse(attr).assign(scope, value) sets expression value
+scope: true //don't leak to outside world
+scope.prop: '=' means use attribute value directly > you get reference to object
+scope.prop: '@' means attribute value is surrounded by {{}} > you get an interpolated string
+
+Transclusion:
+-component surrounds other stuff
+-inside component template use "ng-transclude" and the content of component will be included there
+{ template: "<div class='ok'><div ng-transclude></div></div>" }
+-transcluded content scope is also isolated from component, just as component scope is isolated from outside world > become siblings to $parent
+
+//netdna.bootstrapcdn.com/twitter-bootstrap/2.2.2/css/bootstrap-combined.min.css
+//ajax.googleapis.com/ajax/libs/angularjs/1.0.1/angular.min.js
+//ajax.googleapis.com/ajax/libs/angularjs/1.0.1/angular-resource.min.js
+
+
+ANGULAR RESOURCES REST SERVICE
+
+//REST: set up api for rest service
+myapp.factory('Orders', function ($resource: ngResource.$resource) {
+	return $resource('/api/orders/:id', {
+		id: "@id"
+	}, {
+		update: {
+			method: "PUT",
+			params: { id: "@id" }
+		}
+	});
+});
+
+$scope.Model = Orders.query(
+	function () { },
+	DisplayError
+);
+
+$scope.Delete = function (id) {
+	Orders.delete({ id: id },
+		function () {
+			$scope.Model = Orders.query();
+		}, DisplayError);
+};
+
+$scope.Model = new Orders();
+$scope.Model.Items = [];
+$scope.Save = function () {
+	$scope.Model.$save(
+		function () {
+			$location.path("/list");
+		}, DisplayError
+	);
+};
+
+$scope.Model = Orders.get({ id: $routeParams.id },
+	function () { },
+	DisplayError
+);
+
+$scope.Save = function () {
+	Orders.update({ id: $scope.Model.OrderId }, $scope.Model,
+		function () {
+			$location.path("/list");
+		}, DisplayError
+	);
+};
+
+$scope.Add = function () {
+	var item = new Db.OrderItem();
+	item.Description = "test";
+	item.Amount = 0.0;
+	$scope.Model.Items.push(item);
+};
+
+$scope.Remove = function (index) {
+	$scope.Model.Items.splice(index, 1);
+	$scope.$apply();
+};

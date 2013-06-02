@@ -1,0 +1,2196 @@
+<Treepad version 3.0>
+dt=Text
+<node>
+AngularJS
+0
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+Models.cs
+1
+
+using System;
+using System.Collections.Generic;
+
+namespace AngularWeb
+{
+	public class Order
+	{
+		public Order()
+		{
+			Date = DateTime.Now;
+			Items = new List<OrderItem>();
+		}
+		public int OrderId { get; set; } //Key matches class name
+		public string Name { get; set; }
+		public bool Paid { get; set; }
+		public DateTime Date { get; set; }
+		public virtual List<OrderItem> Items { get; set; } //Virtual to enable tracking
+	};
+
+	public class OrderItem : IEquatable<OrderItem>
+	{
+		public int OrderItemId { get; set; }
+		public string Description { get; set; }
+		public decimal Amount { get; set; }
+		bool IEquatable<OrderItem>.Equals(OrderItem other)
+		{
+			return other != null && OrderItemId > 0 && OrderItemId == other.OrderItemId; //to sync lists
+		}
+	};
+}
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+Database.cs
+1
+
+using System.Data.Entity;
+
+namespace AngularWeb
+{
+	//NUGET: EntityFramework
+	//Database stored in /App_Data/
+	public class OrderDb : DbContext
+	{
+		public OrderDb()
+		{
+			//Don't use in production :)
+			Database.SetInitializer(new DropCreateDatabaseIfModelChanges<OrderDb>());
+		}
+
+		protected override void OnModelCreating(DbModelBuilder modelBuilder)
+		{
+			//Enable cascade-delete
+			modelBuilder.Entity<Order>()
+						.HasMany(x => x.Items)
+						.WithOptional()
+						.WillCascadeOnDelete(true);
+		}
+
+		//Tell context which entities to track
+		public DbSet<Order> Orders { get; set; }
+		public DbSet<OrderItem> OrderItems { get; set; }
+	};
+
+}
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+ConnectionString
+1
+
+
+	<connectionStrings>
+		<add name="OrderDb" connectionString="Data Source=.\SQLEXPRESS;AttachDBFilename=|DataDirectory|\orders.mdf;User Instance=true;Integrated Security=True;MultipleActiveResultSets=True" providerName="System.Data.SqlClient" />
+	</connectionStrings>
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+Controller.cs
+1
+
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Web.Http;
+
+namespace AngularWeb
+{
+	//NUGET: Microsoft.AspNet.WebApi
+	public class OrdersController : ApiController
+	{
+		//Get new *repository* for each request
+		private readonly OrderDb _db = new OrderDb();
+
+		// GET /api/orders
+		public IQueryable<Order> Get()
+		{
+			return _db.Orders;
+		}
+
+		// GET /api/orders/id
+		public Order Get(int id)
+		{
+			return _db.Orders.Find(id);
+		}
+
+		// POST /api/orders
+		public HttpResponseMessage Post([FromBody] Order order)
+		{
+			_db.Orders.Add(order);
+			_db.SaveChanges();
+			return Request.CreateResponse(HttpStatusCode.Created, order);
+		}
+
+		// PUT /api/orders/id
+		public HttpResponseMessage Put(int id, [FromBody] Order model)
+		{
+			var order = _db.Orders.Find(id);
+			model.CopyTo(order); //copy json object to database tracked object
+			model.Items.CopyToList(order.Items);
+			_db.SaveChanges();
+			return Request.CreateResponse(HttpStatusCode.NoContent);
+		}
+
+		// DELETE /api/orders/id
+		public HttpResponseMessage Delete(int id)
+		{
+			var order = _db.Orders.Find(id);
+			_db.Orders.Remove(order);
+			_db.SaveChanges();
+			return Request.CreateResponse(HttpStatusCode.NoContent);
+		}
+
+	};
+}
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+Ext.cs
+1
+
+using System;
+using System.Collections.Generic;
+
+namespace AngularWeb
+{
+	public static class Ext
+	{
+		//Copy all source object primitive properties to destination
+		public static void CopyTo<T>(this T source, T dest) where T : class
+		{
+			if (source == null || dest == null)
+				return;
+
+			foreach (var prop in typeof(T).GetProperties())
+			{
+				if (!prop.PropertyType.IsValueType && prop.PropertyType != typeof(string))
+					continue; //only primitives
+
+				prop.SetValue(dest, prop.GetValue(source, null), null);
+			}
+		}
+
+		//sync items from source list to destination
+		public static void CopyToList<T>(this IList<T> source, IList<T> dest) where T : class, IEquatable<T>, new()
+		{
+			//Process source list
+			foreach (var sourceItem in source)
+			{
+				var found = false;
+				foreach (var destItem in dest)
+				{
+					//Update existing items
+					if (sourceItem.Equals(destItem))
+					{
+						found = true;
+						sourceItem.CopyTo(destItem);
+					}
+				}
+				//Add new items
+				if (!found)
+				{
+					var item = new T();
+					sourceItem.CopyTo(item);
+					dest.Add(item);
+				}
+			}
+			//Process destination list
+			foreach (var destItem in new List<T>(dest))
+			{
+				var found = false;
+				foreach (var sourceItem in source)
+				{
+					if (destItem.Equals(sourceItem)) found = true;
+				}
+				//Remove old items
+				if (!found)
+				{
+					dest.Remove(destItem);
+				}
+			}
+		}
+
+	};
+}
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+Global.asax
+1
+
+using System;
+using System.Web;
+using System.Web.Http;
+
+namespace AngularWeb
+{
+	public class Global : HttpApplication
+	{
+		protected void Application_Start(object sender, EventArgs e)
+		{
+			GlobalConfiguration.Configuration.Formatters.JsonFormatter.SerializerSettings.ReferenceLoopHandling =
+				Newtonsoft.Json.ReferenceLoopHandling.Ignore;
+
+			GlobalConfiguration.Configuration.Formatters.JsonFormatter.SerializerSettings.DateTimeZoneHandling =
+				Newtonsoft.Json.DateTimeZoneHandling.Utc;
+
+			GlobalConfiguration.Configuration.Routes.MapHttpRoute(
+					name: "DefaultApi",
+					routeTemplate: "api/{controller}/{id}",
+					defaults: new { id = RouteParameter.Optional }
+				);
+		}
+
+		protected void Session_Start(object sender, EventArgs e) {}
+		protected void Application_BeginRequest(object sender, EventArgs e) {}
+		protected void Application_AuthenticateRequest(object sender, EventArgs e) {}
+		protected void Application_Error(object sender, EventArgs e) {}
+		protected void Session_End(object sender, EventArgs e) { }
+		protected void Application_End(object sender, EventArgs e) {}
+
+	};
+}
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+POST
+1
+
+POST http://localhost:28723/api/orders HTTP/1.1
+X-Requested-With: XMLHttpRequest
+Accept: application/json, text/plain, */*
+Content-Type: application/json;charset=utf-8
+Host: localhost:28723
+Content-Length: 200
+Connection: Keep-Alive
+Pragma: no-cache
+
+{ "Name":"First item" }
+
+
+POST http://localhost:28723/api/orders HTTP/1.1
+X-Requested-With: XMLHttpRequest
+Accept: application/json, text/plain, */*
+Content-Type: application/json;charset=utf-8
+Host: localhost:28723
+Content-Length: 200
+Connection: Keep-Alive
+Pragma: no-cache
+
+{ "Name":"another item" }
+
+
+POST http://localhost:28723/api/orders HTTP/1.1
+X-Requested-With: XMLHttpRequest
+Accept: application/json, text/plain, */*
+Content-Type: application/json;charset=utf-8
+Host: localhost:28723
+Content-Length: 200
+Connection: Keep-Alive
+Pragma: no-cache
+
+{ "Name":"another item" }
+
+
+POST http://localhost:28723/api/orders HTTP/1.1
+X-Requested-With: XMLHttpRequest
+Accept: application/json, text/plain, */*
+Content-Type: application/json;charset=utf-8
+Host: localhost:28723
+Content-Length: 200
+Connection: Keep-Alive
+Pragma: no-cache
+
+{ "Name":"Old Item" }
+
+
+POST http://localhost:28723/api/orders HTTP/1.1
+X-Requested-With: XMLHttpRequest
+Accept: application/json, text/plain, */*
+Content-Type: application/json;charset=utf-8
+Host: localhost:28723
+Content-Length: 200
+Connection: Keep-Alive
+Pragma: no-cache
+
+{ "Name":"Last Item" }
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+PUT
+1
+PUT http://localhost:28723/api/orders/2 HTTP/1.1
+X-Requested-With: XMLHttpRequest
+Accept: application/json, text/plain, */*
+Content-Type: application/json;charset=utf-8
+Host: localhost:28723
+Content-Length: 200
+Connection: Keep-Alive
+Pragma: no-cache
+
+{ OrderId:2, Name:"Paid Order", Paid:true }
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+DELETE
+1
+DELETE http://localhost:28723/api/orders/3 HTTP/1.1
+X-Requested-With: XMLHttpRequest
+Accept: application/json, text/plain, */*
+Content-Type: application/json;charset=utf-8
+Host: localhost:28723
+Content-Length: 100
+Connection: Keep-Alive
+Pragma: no-cache
+
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+GET
+1
+GET http://localhost:28723/api/orders HTTP/1.1
+X-Requested-With: XMLHttpRequest
+Accept: application/json, text/plain, */*
+Content-Type: application/json;charset=utf-8
+Host: localhost:28723
+Content-Length: 100
+Connection: Keep-Alive
+Pragma: no-cache
+
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+default.htm
+1
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+	<title>AngularJS</title>
+	<style>.ng-cloak { display:none; }</style>
+	<link href="//netdna.bootstrapcdn.com/twitter-bootstrap/2.2.2/css/bootstrap-combined.min.css" rel="stylesheet" />
+</head>
+<body>
+	<div class="container">
+		<div>
+		</div>
+	</div>
+	<script src="//ajax.googleapis.com/ajax/libs/jquery/1.8.3/jquery.min.js"></script>
+	<script src="//ajax.googleapis.com/ajax/libs/angularjs/1.0.1/angular.min.js"></script>
+	<script src="/Content/MyApp.js"></script>
+</body>
+</html>
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+Modules
+1
+
+ANGULAR MODULES
+-namespace for bootstrapping and configuring an angular application
+-usually one module per application
+-you can also have one module per third-party reusable library
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+MyApp.ts
+1
+'use strict';
+/// <reference path='angular.d.ts' />
+
+var myApp = angular.module('myApp', []);
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+angular.d.ts
+1
+//REF: https://github.com/rarous/AngularJS-TypeScript/blob/master/Angular.d.ts
+
+interface AngularVersion {
+	full: string;
+	major: number;
+	minor: number;
+	dot: number;
+	codeName: string;
+}
+
+interface AngularModule {
+	requires: string[];
+	name: string;
+	provider(name: string, providerType: Function): AngularModule;
+	factory(name: string, providerFunction: Function): AngularModule;
+	service(name: string, constructor: Function): AngularModule;
+	value(name: string, object: any): AngularModule;
+	constant(name: string, object: any): AngularModule;
+	filter(name: string, filterFactory: Function): AngularModule;
+	controller(name: string, constructor: Function): AngularModule;
+	directive(name: string, directiveFactory: Function): AngularModule;
+	config(configFn: Function): AngularModule;
+	run(initializationFn: Function): AngularModule;
+}
+
+interface AngularInjector {
+	get(name: string): any;
+	invoke(fn: Function, self?: any, locals?: any): any;
+	instantiate(constructor: any, locals?: Object): any;
+	annotate(fn: Function): string[];
+	annotate(fns: string[]): string[];
+	annotate(fns: Function[]): string[];
+}
+
+interface JQuery { 
+	controller(name: string): Object;
+	injector(): AngularInjector;
+	scope(): ng.Scope;
+	inheritedData(key?: string): any;
+}
+
+interface AngularStatic {
+	bootstrap(element: Element, modules: string[]): any;
+	bootstrap(element: Element, modules: Function[]): any;
+	copy(source: any, destination: Object): Object;
+	copy(source: any, destination: Array): Array;
+	extend(dest: Object, ...src: any[]): Object;
+	equals(o1: any, o2: any): bool;
+	element(element: string): JQuery;
+	element(element: Element): JQuery;
+	forEach(obj: Array, iterator: (value: any, index?: number) => void, context?: any): Array;
+	forEach(obj: Object, iterator: (value: any, key?: string) => void, context?: any): Object;
+	injector(modules: string[]): AngularInjector;
+	injector(modules: Function[]): AngularInjector;
+	module(name: string, requesires?: string[], configFn?: Function): AngularModule;
+	module(name: string, configFn: Function): AngularModule;
+	noop(): void;
+	bind(self: Object, fn: Function, ...args: any[]): Function;
+	toJson(obj: any, pretty: bool): string;
+	fromJson(json: string): any;
+	identity(...$: any[]): any;
+	isUndefined(value: any): bool;
+	isDefined(value: any): bool;
+	isObject(value: any): bool;
+	isString(value: any): bool;
+	isNumber(value: any): bool;
+	isDate(value: any): bool;
+	isArray(value: any): bool;
+	isFunction(value: any): bool;
+	isElement(value: any): bool;
+	lowercase(string: string): string;
+	uppercase(string: string): string;
+	//callbacks
+	version: AngularVersion;
+}
+
+declare module ng {
+
+	export interface Deregistration {
+		();
+	}
+
+	export interface CacheInfo {
+		id: string;
+		size: number;
+	}
+
+	export interface Cache {
+		put(key: string, value: any);
+		get(key: string): any;
+		remove(key: string);
+		removeALl();
+		destroy();
+		info(): CacheInfo;
+	}
+
+	export interface Provider {
+		register(name: string, constructor: Function);
+	}
+
+	export interface HttpConfig {
+		method: string;
+		url: string;
+		params: Object;
+		data: any;
+		headers: Object;
+		transformRequest: (data: any, headersGetter: () => Object) => void;
+		transformResponse: (data: any, headersGetter: () => Object) => void;
+		cache: Cache;
+		timeout: number;
+		withCredentials: bool;
+		responseType: string;
+	}
+
+	export interface HttpResponse {
+		data: any;
+		status: number;
+		headers: (name: string) => string;
+		config: HttpConfig;
+	}
+
+	export interface HttpPromise {
+		then(success: (response: HttpResponse) => void, error?: (response: HttpResponse) => void);
+		success(callback: (response: HttpResponse) => void);
+		error(callback: (response: HttpResponse) => void);
+	}
+
+	export interface Http {
+		(config: HttpConfig) : HttpPromise;
+		pendingRequests: HttpConfig[];
+		get(url: string, config?: HttpConfig): HttpPromise;
+		delete(url: string, config?: HttpConfig): HttpPromise;
+		head(url: string, config?: HttpConfig): HttpPromise;
+		jsonp(url: string, config?: HttpConfig): HttpPromise;
+		post(url: string, data: any, config?: HttpConfig): HttpPromise;
+		put(url: string, data: any, config?: HttpConfig): HttpPromise;
+		defaults: HttpConfig;
+	}
+
+	export interface InterpolateProvider {
+		startSymbol(): string;
+		startSymbol(value: string): InterpolateProvider;
+		endSymbol(): string;
+		endSymbol(value: string): InterpolateProvider;
+	}
+
+	export interface Interpolate {
+		(text: string, mustHaveExpression?: bool): (context: Object) => string;
+		startSymbol(): string;
+		endSymbol(): string;
+	}
+	
+	export interface Location {
+		absUrl(): string;
+		url(): string;
+		url(url: string): Location;
+		protocol(): string;
+		host(): string;
+		port(): number;
+		path(): string;
+		path(path: string): Location;
+		search(): string;
+		search(search: string): Location;
+		search(search: string, paramValue: string): Location;
+		search(search: Object): Location;
+		hash(): string;
+		hash(hash: string): Location;
+		replace(): Location;
+	}
+	
+	export interface LocationProvider {
+		hashPrefix(): string;
+		hashPrefix(prefix: string): LocationProvider;
+		html5Mode(): any;
+		html5Mode(mode: string): LocationProvider;
+	}
+	
+	export interface Log {
+		log(...args: any[]);
+		warn(...args: any[]);
+		info(...args: any[]);
+		error(...args: any[]);
+	}
+	
+	export interface Promise {
+		then(successCallback: (result: any) => any, errorCallback?: (reason: any) => any): Promise;
+	}
+	
+	export interface Deferred {
+		resolve(value);
+		reject(reason);
+		promise: Promise;
+	}
+
+	export interface DeferredFactory {
+		defer(): Deferred;
+		reject(reason: any): Promise;
+		when(value: any, success?: (result: any) => any, error?: (reason: any) => any): Promise;
+		all(promises: Promise[]): Promise;
+	}
+	
+	export interface ScopeProvider {
+		digestTtl(limit: number);
+	}
+
+	export interface Scope {
+		$new(isolate: bool): Scope;
+		$watch(watchExpression: string, listener?: string, objectEquality?: bool): Deregistration;
+		$watch(watchExpression: string, listener?: (newValue?: any, oldValue?: any, scope?: Scope) => any, objectEquality?: bool): Deregistration;
+		$watch(watchExpression: (scope: Scope) => any, listener?: string, objectEquality?: bool): Deregistration;
+		$watch(watchExpression: (scope: Scope) => any, listener?: (newValue?: any, oldValue?: any, scope?: Scope) => any, objectEquality?: bool): Deregistration;
+		$digest();
+		$destroy();
+		$eval(): any;
+		$eval(expression: string): any;
+		$eval(expression: (scope?: Scope) => any): any;
+		$evalAsync();
+		$evalAsync(expression: string);
+		$evalAsync(expression: (scope?: Scope) => any);
+		$apply(): any;
+		$apply(expression: string): any;
+		$apply(expression: (scope?: Scope) => any): any;
+		$on(name: string, listener: (event: Event) => any): Deregistration;
+		$emit(name: string, ...args: any[]): Event;
+		$broadcast(name: string, ...args: any[]): Event;
+	}
+
+	export interface RouteMap {
+		[key: string]: Function;
+	}
+
+	export interface Route {
+		controller?: any;
+		template?: string;
+		templateUrl?: string;
+		resolve?: RouteMap;
+		key?: string;
+		factory?: any;
+		redirectTo?: any;
+	}
+	
+	export interface RouteProvider {
+		when(path: string, route: Route) : RouteProvider;
+		otherwise(route: Route): RouteProvider;
+	}
+	
+	export interface RouteStatic {
+		current: Route;
+		routes: Route[];
+		reload();
+	}
+	
+	export interface Timeout {
+		(fn: Function, delay?: number, invokeApply?: bool): Promise;
+		cancel(promise?: Promise): bool;
+	}
+
+	export interface $parse {
+		(expression: string): (context: Object, locals?: Object) => any;
+	}
+}
+
+declare module ngCookies {
+	export interface Cookies {
+		[name: string]: Object;
+	}
+
+	export interface CookieStore {
+		get(key: string): Object;
+		put(key: string, value: Object);
+		remove(key: string);
+	}
+}
+
+declare module ngResource {
+	export interface Action {
+		method?: string;
+		params?: Object;
+		isArray?: bool;
+		headers?: Object;
+	}
+	
+	export interface ActionHash {
+		[action: string]: Action;
+	}
+	
+	export interface Resource {
+		get(parameters?: Object, success?: Function, error?: Function): ResourceItem;
+		save(postData: Object, success?: Function, error?: Function);
+		save(postData: Array, success?: Function, error?: Function);
+		save(parameters: Object, postData: Object, success?: Function, error?: Function);
+		save(parameters: Object, postData: Array, success?: Function, error?: Function);
+		query(parameters?: Object, success?: Function, error?: Function): ResourceItem[];
+		remove(postData: Object, success?: Function, error?: Function);
+		remove(postData: Array, success?: Function, error?: Function);
+		remove(parameters: Object, postData: Object, success?: Function, error?: Function);
+		remove(parameters: Object, postData: Array, success?: Function, error?: Function);
+		delete(postData: Object, success?: Function, error?: Function);
+		delete(postData: Array, success?: Function, error?: Function);
+		delete(parameters: Object, postData: Object, success?: Function, error?: Function);
+		delete(parameters: Object, postData: Array, success?: Function, error?: Function);
+	}
+	
+	export interface ResourceItem {
+		$save(parameters?: Object, success?: Function, error?: Function);
+		$remove(parameters?: Object, success?: Function, error?: Function);
+		$delete(parameters?: Object, success?: Function, error?: Function);
+	}
+
+	export interface $resource {
+		(url: string, paramDefaults?: Object, actions?: ngResource.ActionHash): ngResource.Resource;
+	}
+}
+
+declare var angular: AngularStatic;
+declare function $anchorScroll();
+declare function $cacheFactory(cacheId: string, options?: Object): ng.Cache;
+declare var $templateCache: ng.Cache;
+// TODO: $compile
+declare var $controllerProvider: ng.Provider;
+declare function $controller(constructor: Function, locals: Object): Object;
+declare function $controller(constructor: string, locals: Object): Object;
+declare var $document: JQuery;
+declare function $exceptionHandler(exception: Error, cause?: string);
+declare var $filterProvider: ng.Provider;
+declare function $filter(name: string): Function;
+declare var $http: ng.Http;
+declare var $interpolateProvider: ng.InterpolateProvider;
+declare var $interpolate: ng.Interpolate;
+declare var $locale: string;
+declare var $location: ng.Location;
+declare var $locationProvider: ng.LocationProvider;
+declare var $log: ng.Log;
+declare function $parse(expression: string): (context: Object, locals: Object) => any;
+declare var $q: ng.DeferredFactory;
+declare var $rootElement: JQuery;
+declare var $rootScopeProvider: ng.ScopeProvider;
+declare var $rootScope: ng.Scope;
+declare var $routeProvider: ng.RouteProvider;
+declare var $route: ng.RouteStatic;
+declare var $routeParams: Object;
+declare var $timeout: ng.Timeout;
+declare var $window: Window;
+
+declare var $cookies: ngCookies.Cookies;
+declare var $cookieStore: ngCookies.CookieStore;
+
+declare function $resource(url: string, paramDefaults?: Object, actions?: ngResource.ActionHash): ngResource.Resource;
+
+declare function $sanitize(html: string): string;
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+HomeCtrl
+1
+
+ANGULAR CONTROLLERS
+-function that has behavior for a view
+-should not reference DOM, use directives
+-where do I get X from?
+-what happens if user does X
+-new instance per rendering of view
+
+
+//CONTROLLER: Home
+function HomeCtrl($scope) {
+	$scope.Name = "Alt.net";
+	$scope.Welcome = function () {
+		alert("Welcome: " + $scope.Name);
+	};
+}
+
+
+	<div class="container ng-cloak" ng-app='myApp'>
+		<div class="form-horizontal well" ng-controller='HomeCtrl'>
+			<input ng-model="Name" /><br/>
+			Hello {{ Name }}!<br/>
+			<button ng-click="Welcome()">Welcome</button>
+		</div>
+	</div>
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+ng-include
+1
+
+
+//CONTROLLER: Header
+function HeaderCtrl($scope, $location: ng.Location) {
+	$scope.location = $location;
+}
+
+
+<ng-include src="'/Content/header.htm'"></ng-include>
+
+
+<header class="jumbotron jumbotron1 subhead" ng-controller="HeaderCtrl">
+	<h1>Welcome to Angular</h1>
+	<div class='navbar navbar-static-top'>
+		<div class='navbar-inner'>
+			<a href='#/' class="brand">Orders</a>
+			<ul class="nav">
+				<li ng-class="{active: location.path() == '/list'}"><a href="#/list">List Orders</a></li>
+				<li ng-class="{active: location.path() == '/edit'}"><a href='#/edit' >Add Order</a></li>
+			</ul>
+		</div>
+	</div>
+</header>
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+Routing
+1
+
+//ROUTING
+myApp.config(function ($routeProvider: ng.RouteProvider) {
+	$routeProvider
+		.when('/',			{ templateUrl: '/Content/home.htm' })
+		.when('/edit',		{ templateUrl: '/Content/edit.htm' })
+		.when('/edit/:id',	{ templateUrl: '/Content/edit.htm' })
+		.when('/list',		{ templateUrl: '/Content/list.htm' })
+		.otherwise(			{ redirectTo: '/' })
+	;
+});
+
+
+<ng-view></ng-view>
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+Db.Orders
+1
+
+ANGULAR SERVICES
+-should not reference DOM (mostly)
+-are singleton
+-have logic independent of view > do X operation
+-have shared functionality used by multiple controllers
+
+
+//HTTP: consume /api/orders REST service
+module Db {
+	export class Orders {
+		constructor(public $http: ng.Http) { }
+		public List(success) {
+			this.$http.get('/api/orders').success(success).error(ErrorHandler);
+		}
+		public Delete(id, success) {
+			this.$http.delete('/api/orders/' + id).success(success).error(ErrorHandler);
+		}
+	}
+}
+
+//SERVICE: register Db.Orders service with angular DI
+myApp.factory('Orders', function ($http: ng.Http) {
+	return new Db.Orders($http);
+});
+
+//UTILITY: display json error object message
+function ErrorHandler(error) {
+	alert('Server Error ' + ErrorMessage(error.data ? error.data : error));
+}
+
+//UTILITY: extract innermost message from exception object
+function ErrorMessage(ex) {
+	return ex.InnerException ? ErrorMessage(ex.InnerException) : (ex.ExceptionMessage || ex.Message);
+}
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+ListCtrl
+1
+
+//CONTROLLER: list
+function ListCtrl($scope, Orders: Db.Orders) {
+	$scope.Refresh = function () {
+		Orders.List(function (orders) {
+			$scope.Model = orders;
+		});
+	};
+	$scope.Refresh();
+	$scope.Delete = function (id) {
+		Orders.Delete(id, function () {
+			$scope.Refresh();
+		});
+	};
+}
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+list.htm
+1
+
+<div class="form-horizontal well" ng-controller="ListCtrl">
+	<table class="table table-bordered table-striped table-hover ng-cloak">
+		<thead>
+			<tr><th>Paid</th><th>Date</th><th>Name</th><th>Actions</th></tr>
+		</thead>
+		<tbody>
+			<tr ng-repeat="item in Model">
+				<td>{{ item.Paid }}</td>
+				<td>{{ item.Date }}</td>
+				<td><a href="#/edit/{{ item.OrderId }}">{{ item.Name }}</a></td>
+				<td>
+					<button class="btn-mini" ng-click="Delete(item.OrderId)">
+						<i class="icon-trash"></i>
+					</button>
+				</td>
+			</tr>
+		</tbody>
+	</table>
+</div>
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+checkmark
+1
+
+//FILTER: Text filter to convert boolean value to checkmark
+myApp.filter('checkmark', function () {
+	return function (boolValue: bool) {
+		return boolValue ? '\u2713' : '\u2718';
+	};
+});
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+toDate
+1
+
+//FILTER: convert ISO 8601 string to date, then use date:'MM/dd/yyyy'
+myApp.filter('strToDate', function () {
+	return function (dateString: string) {
+		return parseISO8601(dateString);
+	};
+});
+
+//UTILITY: convert web api utc date string to local time date object
+function parseISO8601(str: string): Date {
+
+	var parts = str.split('T'),
+	dateParts = parts[0].split('-'),
+	timeParts = parts[1].split('Z'),
+	timeSubParts = timeParts[0].split(':'),
+	timeSecParts = timeSubParts[2].split('.'),
+	timeHours = Number(timeSubParts[0]),
+	_date = new Date;
+
+	_date.setUTCFullYear(Number(dateParts[0]));
+	_date.setUTCMonth(Number(dateParts[1]) - 1);
+	_date.setUTCDate(Number(dateParts[2]));
+	_date.setUTCHours(Number(timeHours));
+	_date.setUTCMinutes(Number(timeSubParts[1]));
+	_date.setUTCSeconds(Number(timeSecParts[0]));
+	if (timeSecParts[1]) _date.setUTCMilliseconds(Number(timeSecParts[1]));
+
+	return _date;
+}
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+paidFilter
+1
+
+
+<tr ng-repeat="item in Model | filter:{Paid:true}">
+
+
+	$scope.Where = function(paid: bool) {
+		$scope.whereFilter = paid == undefined ? {} : { Paid:paid };
+	};
+	$scope.Where();
+	$scope.Selected = function(paid: bool): bool {
+		return $scope.whereFilter.Paid == paid;
+	};
+
+
+		<tfoot>
+			<tr>
+				<td colspan="4">
+					Count: {{ filtered.length }}
+					<a class="btn" ng-class="{'btn-primary':Selected(undefined), disabled:Selected(undefined)}" ng-click="Where()">All</a>
+					<a class="btn" ng-class="{'btn-primary':Selected(true), disabled:Selected(true)}" ng-click="Where(true)">Paid</a>
+					<a class="btn" ng-class="{'btn-primary':Selected(false), disabled:Selected(false)}" ng-click="Where(false)">Unpaid</a>
+				</td>
+			</tr>
+		</tfoot>
+
+
+<tr ng-repeat="item in filtered = (Model | filter:whereFilter)">
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+confirm
+1
+
+DIRECTIVES
+-manipulate DOM by extending HTML
+-linking binds scope to template
+-scope.$apply() tells view to redraw, things changed
+
+
+//DIRECTIVE: confirm='func' will popup confirmation dialog with optional confirm-msg attribute
+myApp.directive('confirm', function($parse: ng.$parse) {
+	return {
+		restrict: 'A', //Attribute
+		link: function(scope: ng.Scope, elm, attrs) {
+			elm.bind('click', function() {
+
+				if (!confirm('Are you sure?')) 
+					return false;
+				
+				var confirmFunc = $parse(attrs.confirm);
+				confirmFunc(scope);
+				
+				return true;
+			});
+		}
+	};
+});
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+confirm-msg
+1
+
+				var confirmMsg = attrs.confirmMsg || 'Are you sure?';
+				if (confirmMsg.indexOf('{{') > -1) 
+					confirmMsg = scope.$eval(confirmMsg);
+
+				if (!confirm(confirmMsg)) 
+					return false;
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+navbar
+1
+
+ANGULAR TRANSCLUDING COMPONENTS
+-Component tag surrounds other html
+-inside component template use "ng-transclude" and the content of component will be included there
+-All these custom tag formats valid:
+	<my-component>
+	<div my-component>
+	<div class="my-component">
+	<my:component>
+	<div x-my-component>
+	<div data-my-component>
+	<!-- directive:my-component -->
+
+
+//COMPONENT: navbar
+myApp.directive('navbar', function() {
+	return {
+		restrict: 'E', //Element
+		replace: true,
+		transclude: true,
+		template: "<div class='navbar navbar-static-top'><div class='navbar-inner'><div ng-transclude></div></div>",
+		link: function(scope) {
+			
+		}
+	};
+});
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+httpSpinner
+1
+
+//REF: http://jsfiddle.net/niden/86L5p/
+//INTERCEPTOR: httpSpinner
+myApp
+	.config(function ($httpProvider) {
+		$httpProvider.responseInterceptors.push('httpSpinner');
+		var startSpinner = function (data, headersGetter) {
+			$('.ajax-loader').show();
+			return data;
+		};
+		$httpProvider.defaults.transformRequest.push(startSpinner);
+	})
+	// register the interceptor as a service, intercepts ALL angular ajax http calls
+	.factory('httpSpinner', function ($q, $window) {
+		var stopSpinner = function () {
+			$('.ajax-loader').hide();
+		}
+		return function (promise) {
+			return promise.then(function (response) {
+				stopSpinner();
+				return response;
+			}, function (response) {
+				stopSpinner();
+				return $q.reject(response);
+			});
+		};
+	})
+;
+
+
+		<div class="ajax-loader" style='display:none;padding:1em;text-align:center;'>
+			Loading <img src="/Content/ajax-loader.gif" />
+		</div>
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+jquery.d.ts
+1
+/* *****************************************************************************
+Copyright (c) Microsoft Corporation. All rights reserved.
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+this file except in compliance with the License. You may obtain a copy of the
+License at http://www.apache.org/licenses/LICENSE-2.0  
+
+THIS CODE IS PROVIDED *AS IS* BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, EITHER EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION ANY IMPLIED
+WARRANTIES OR CONDITIONS OF TITLE, FITNESS FOR A PARTICULAR PURPOSE,
+MERCHANTABLITY OR NON-INFRINGEMENT.
+
+See the Apache Version 2.0 License for specific language governing permissions
+and limitations under the License.
+***************************************************************************** */
+
+// Typing for the jQuery library, version 1.7.x
+
+/*
+   Interface for the AJAX setting that will configure the AJAX request
+*/
+interface JQueryAjaxSettings {
+   accepts?: any;
+   async?: bool;
+   beforeSend?(jqXHR: JQueryXHR, settings: JQueryAjaxSettings);
+   cache?: bool;
+   complete?(jqXHR: JQueryXHR, textStatus: string);
+   contents?: { [key: string]: any; };
+   contentType?: string;
+   context?: any;
+   converters?: { [key: string]: any; };
+   crossDomain?: bool;
+   data?: any;
+   dataFilter?(data: any, ty: any): any;
+   dataType?: string;
+   error?(jqXHR: JQueryXHR, textStatus: string, errorThrow: string): any;
+   global?: bool;
+   headers?: { [key: string]: any; };
+   ifModified?: bool;
+   isLocal?: bool;
+   jsonp?: string;
+   jsonpCallback?: any;
+   mimeType?: string;
+   password?: string;
+   processData?: bool;
+   scriptCharset?: string;
+   statusCode?: { [key: string]: any; };
+   success?(data: any, textStatus: string, jqXHR: JQueryXHR);
+   timeout?: number;
+   traditional?: bool;
+   type?: string;
+   url?: string;
+   username?: string;
+   xhr?: any;
+   xhrFields?: { [key: string]: any; };
+}
+
+/*
+   Interface for the jqXHR object
+*/
+interface JQueryXHR extends XMLHttpRequest {
+   overrideMimeType();
+}
+
+/*
+   Interface for the JQuery callback
+*/
+interface JQueryCallback {
+   add(...callbacks: any[]): any;
+   disable(): any;
+   empty(): any;
+   fire(...arguments: any[]): any;
+   fired(): bool;
+   fireWith(context: any, ...args: any[]): any;
+   has(callback: any): bool;
+   lock(): any;
+   locked(): bool;
+   removed(...callbacks: any[]): any;
+}
+
+/*
+   Interface for the JQuery promise, part of callbacks
+*/
+interface JQueryPromise {
+   always(...alwaysCallbacks: any[]): JQueryDeferred;
+   done(...doneCallbacks: any[]): JQueryDeferred;
+   fail(...failCallbacks: any[]): JQueryDeferred;
+   pipe(doneFilter?: (x: any) => any, failFilter?: (x: any) => any, progressFilter?: (x: any) => any): JQueryPromise;
+   then(doneCallbacks: any, failCallbacks: any, progressCallbacks?: any): JQueryDeferred;
+}
+
+/*
+   Interface for the JQuery deferred, part of callbacks
+*/
+interface JQueryDeferred extends JQueryPromise {
+   notify(...args: any[]): JQueryDeferred;
+   notifyWith(context: any, ...args: any[]): JQueryDeferred;
+
+   pipe(doneFilter?: any, failFilter?: any, progressFilter?: any): JQueryPromise;
+   progress(...progressCallbacks: any[]): JQueryDeferred;
+   reject(...args: any[]): JQueryDeferred;
+   rejectWith(context:any, ...args: any[]): JQueryDeferred;
+   resolve(...args: any[]): JQueryDeferred;
+   resolveWith(context:any, ...args: any[]): JQueryDeferred;
+   state(): string;
+   then(doneCallbacks: any, failCallbacks: any, progressCallbacks?: any): JQueryDeferred;
+}
+
+/*
+   Interface of the JQuery extension of the W3C event object
+*/
+interface JQueryEventObject extends Event {
+   data: any;
+   delegateTarget: Element;
+   isDefaultPrevented(): bool;
+   isImmediatePropogationStopped(): bool;
+   isPropogationStopped(): bool;
+   namespace: string;
+   preventDefault(): any;
+   relatedTarget: Element;
+   result: any;
+   stopImmediatePropagation();
+   stopPropagation();
+   pageX: number;
+   pageY: number;
+   which: number;
+   metaKey: any;
+}
+
+/*
+   Collection of properties of the current browser
+*/
+interface JQueryBrowserInfo {
+   safari:bool;
+   opera:bool;
+   msie:bool;
+   mozilla:bool;
+   version:string;
+}
+
+interface JQuerySupport {
+   ajax?: bool;
+   boxModel?: bool;
+   changeBubbles?: bool;
+   checkClone?: bool;
+   checkOn?: bool;
+   cors?: bool;
+   cssFloat?: bool;
+   hrefNormalized?: bool;
+   htmlSerialize?: bool;
+   leadingWhitespace?: bool;
+   noCloneChecked?: bool;
+   noCloneEvent?: bool;
+   opacity?: bool;
+   optDisabled?: bool;
+   optSelected?: bool;
+   scriptEval?(): bool;
+   style?: bool;
+   submitBubbles?: bool;
+   tbody?: bool;
+}
+
+/*
+   Static members of jQuery (those on $ and jQuery themselves)
+*/
+interface JQueryStatic {
+
+   /****
+    AJAX
+   *****/
+   ajax(settings: JQueryAjaxSettings);
+   ajax(url: string, settings: JQueryAjaxSettings);
+
+   ajaxPrefilter(dataTypes: string, handler: (opts: any, originalOpts: any, jqXHR: JQueryXHR) => any): any;
+   ajaxPrefilter(handler: (opts: any, originalOpts: any, jqXHR: JQueryXHR) => any): any;
+
+   ajaxSetup(options: any);
+
+   get(url: string, data?: any, success?: any, dataType?: any): JQueryXHR;
+   getJSON(url: string, data?: any, success?: any): JQueryXHR;
+   getScript(url: string, success?: any): JQueryXHR;
+
+   param(obj: any): string;
+   param(obj: any, traditional: bool): string;
+
+   post(url: string, data?: any, success?: any, dataType?: any): JQueryXHR;
+
+   /*********
+    CALLBACKS
+   **********/
+   Callbacks(flags: any): JQueryCallback;
+
+   /****
+    CORE
+   *****/
+   holdReady(hold: bool): any;
+
+   (selector: string, context?: any): JQuery;
+   (element: Element): JQuery;
+   (object: { }): JQuery;
+   (elementArray: Element[]): JQuery;
+   (object: JQuery): JQuery;
+   (func: Function): JQuery;
+   (): JQuery;
+
+   noConflict(removeAll?: bool): Object;
+
+   when(...deferreds: any[]): JQueryPromise;
+
+   /***
+    CSS
+   ****/
+   css(e: any, propertyName: string, value?: any);
+   css(e: any, propertyName: any, value?: any);
+   cssHooks: { [key: string]: any; };
+
+   /****
+    DATA
+   *****/
+   data(element: Element, key: string, value: any): Object;
+
+   dequeue(element: Element, queueName?: string): any;
+
+   hasData(element: Element): bool;
+
+   queue(element: Element, queueName?: string): any[];
+   queue(element: Element, queueName: string, newQueueOrCallback: any): JQuery;
+
+   removeData(element: Element, name?: string): JQuery;
+
+   /*******
+    EFFECTS
+   ********/
+   fx: { tick: () => void; interval: number; stop: () => void; speeds: { slow: number; fast: number; }; off: bool; step: any; };
+
+   /******
+    EVENTS
+   *******/
+   proxy(func: Function, context: any): any;
+   proxy(context: any, name: string): any;
+
+   /*********
+    INTERNALS
+   **********/
+   error(message: any);
+   
+   /*************
+    MISCELLANEOUS
+   **************/
+   expr: any;
+   fn: any;  //TODO: Decide how we want to type this
+   isReady: bool;
+
+   /**********
+    PROPERTIES
+   ***********/
+   browser: JQueryBrowserInfo;
+   support: JQuerySupport;
+
+   /*********
+    UTILITIES
+   **********/
+   contains(container: Element, contained: Element): bool;
+
+   each(collection: any, callback: (indexInArray: any, valueOfElement: any) => any): any;
+
+   extend(target: any, ...objs: any[]): Object;
+   extend(deep: bool, target: any, ...objs: any[]): Object;
+
+   globalEval(code: string): any;
+
+   grep(array: any[], func: any, invert: bool): any[];
+
+   inArray(value: any, array: any[], fromIndex?: number): number;
+
+   isArray(obj: any): bool;
+   isEmptyObject(obj: any): bool;
+   isFunction(obj: any): bool;
+   isNumeric(value: any): bool;
+   isPlainObject(obj: any): bool;
+   isWindow(obj: any): bool;
+   isXMLDoc(node: Node): bool;
+
+   makeArray(obj: any): any[];
+
+   map(array: any[], callback: (elementOfArray: any, indexInArray: any) =>any): JQuery;
+   
+   merge(first: any[], second: any[]): any[];
+
+   noop(): any;
+
+   now(): number;
+
+   parseJSON(json: string): any;
+
+   //FIXME: This should return an XMLDocument
+   parseXML(data: string): any;
+
+   queue(element: Element, queueName: string, newQueue: any[]): JQuery;
+
+   trim(str: string): string;
+
+   type(obj: any): string;
+
+   unique(arr: any[]): any[];
+}
+
+/*
+   The jQuery instance members
+*/
+interface JQuery {
+   /****
+    AJAX
+   *****/
+   ajaxComplete(handler: any): JQuery;
+   ajaxError(handler: (evt: any, xhr: any, opts: any) => any): JQuery;
+   ajaxSend(handler: (evt: any, xhr: any, opts: any) => any): JQuery;
+   ajaxStart(handler: () => any): JQuery;
+   ajaxStop(handler: () => any): JQuery;
+   ajaxSuccess(handler: (evt: any, xml: any, opts: any) => any): JQuery;
+
+   load(url: string, data?: any, complete?: any): JQuery;
+
+   serialize(): string;
+   serializeArray(): any[];
+
+   /**********
+    ATTRIBUTES
+   ***********/
+   addClass(classNames: string): JQuery;
+   addClass(func: (index: any, currentClass: any) => JQuery);
+
+   attr(attributeName: string): string;
+   attr(attributeName: string, value: any): JQuery;
+   attr(map: { [key: string]: any; }): JQuery;
+   attr(attributeName: string, func: (index: any, attr: any) => any): JQuery;
+
+   hasClass(className: string): bool;
+
+   html(htmlString: string): JQuery;
+   html(): string;
+
+   prop(propertyName: string): string;
+   prop(propertyName: string, value: any): JQuery;
+   prop(map: any): JQuery;
+   prop(propertyName: string, func: (index: any, oldPropertyValue: any) => any): JQuery;
+
+   removeAttr(attributeName: any): JQuery;
+
+   removeClass(className?: any): JQuery;
+   removeClass(func: (index: any, cls: any) => any): JQuery;
+
+   removeProp(propertyName: any): JQuery;
+
+   toggleClass(className: any, swtch?: bool): JQuery;
+   toggleClass(swtch?: bool): JQuery;
+   toggleClass(func: (index: any, cls: any, swtch: any) => any): JQuery;
+
+   val(): any;
+   val(value: string[]): JQuery;
+   val(value: string): JQuery;
+   val(func: (index: any, value: any) => any): JQuery;
+
+   /***
+    CSS
+   ****/
+   css(propertyName: string, value?: any);
+   css(propertyName: any, value?: any);
+   
+   height(): number;
+   height(value: number): JQuery;
+   height(func: (index: any, height: any) => any): JQuery;
+
+   innerHeight(): number;
+   innerWidth(): number;
+
+   offset(): { top: number; left: number; };
+   offset(coordinates: any): JQuery;
+   offset(func: (index: any, coords: any) => any): JQuery;
+
+   outerHeight(includeMargin?: bool): number;
+   outerWidth(includeMargin?: bool): number;
+
+   position(): { top: number; left: number; };
+
+   scrollLeft(): number;
+   scrollLeft(value: number): JQuery;
+
+   scrollTop(): number;
+   scrollTop(value: number): JQuery;
+
+   width(): number;
+   width(value: number): JQuery;
+   width(func: (index: any, height: any) => any): JQuery;
+
+   /****
+    DATA
+   *****/
+   clearQueue(queueName?: string): JQuery;
+
+   data(key: string, value: any): JQuery;
+   data(obj: { [key: string]: any; }): JQuery;
+   data(key?: string): any;
+
+   dequeue(queueName?: string): JQuery;
+
+   removeData(nameOrList?: any): JQuery;
+
+   /********
+    DEFERRED
+   *********/
+   promise(type?: any, target?: any): JQueryPromise;
+
+   /*******
+    EFFECTS
+   ********/
+   animate(properties: any, duration?: any, easing?: string, complete?: Function): JQuery;
+   animate(properties: any, options: { duration?: any; easing?: string; complete?: Function; step?: Function; queue?: bool; specialEasing?: any; });
+
+   delay(duration: number, queueName?: string): JQuery;
+
+   fadeIn(duration?: any, callback?: any): JQuery;
+   fadeIn(duration?: any, easing?: string, callback?: any): JQuery;
+
+   fadeOut(duration?: any, callback?: any): JQuery;
+   fadeOut(duration?: any, easing?: string, callback?: any): JQuery;
+
+   fadeTo(duration: any, opacity: number, callback?: any): JQuery;
+   fadeTo(duration: any, opacity: number, easing?: string, callback?: any): JQuery;
+
+   fadeToggle(duration?: any, easing?: string, callback?: any): JQuery;
+
+   hide(duration?: any, callback?: any): JQuery;
+   hide(duration?: any, easing?: string, callback?: any): JQuery;
+
+   show(duration?: any, callback?: any): JQuery;
+   show(duration?: any, easing?: string, callback?: any): JQuery;
+
+   slideDown(duration?: any, callback?: any): JQuery;
+   slideDown(duration?: any, easing?: string, callback?: any): JQuery;
+
+   slideToggle(duration?: any, callback?: any): JQuery;
+   slideToggle(duration?: any, easing?: string, callback?: any): JQuery;
+
+   slideUp(duration?: any, callback?: any): JQuery;
+   slideUp(duration?: any, easing?: string, callback?: any): JQuery;
+
+   stop(clearQueue?: bool, jumpToEnd?: bool): JQuery;
+   stop(queue?:any, clearQueue?: bool, jumpToEnd?: bool): JQuery;
+
+   toggle(duration?: any, callback?: any): JQuery;
+   toggle(duration?: any, easing?: string, callback?: any): JQuery;
+   toggle(showOrHide: bool): JQuery;
+
+   /******
+    EVENTS
+   *******/
+   bind(eventType: string, eventData?: any, handler?: (eventObject: JQueryEventObject) => any): JQuery;
+   bind(eventType: string, eventData: any, preventBubble:bool): JQuery;
+   bind(eventType: string, preventBubble:bool): JQuery;
+   bind(...events: any[]);
+
+   blur(eventData?: any, handler?: (eventObject: JQueryEventObject) => any): JQuery;
+   blur(handler: (eventObject: JQueryEventObject) => any): JQuery;
+
+   change(eventData?: any, handler?: (eventObject: JQueryEventObject) => any): JQuery;
+   change(handler: (eventObject: JQueryEventObject) => any): JQuery;
+
+   click(eventData?: any, handler?: (eventObject: JQueryEventObject) => any): JQuery;
+   click(handler: (eventObject: JQueryEventObject) => any): JQuery;
+
+   dblclick(eventData?: any, handler?: (eventObject: JQueryEventObject) => any): JQuery;
+   dblclick(handler: (eventObject: JQueryEventObject) => any): JQuery;
+
+   delegate(selector: any, eventType: string, handler: (eventObject: JQueryEventObject) => any): JQuery;
+
+
+   focus(eventData?: any, handler?: (eventObject: JQueryEventObject) => any): JQuery;
+   focus(handler: (eventObject: JQueryEventObject) => any): JQuery;
+
+   focusin(eventData: any, handler: (eventObject: JQueryEventObject) => any): JQuery;
+   focusin(handler: (eventObject: JQueryEventObject) => any): JQuery;
+
+   focusout(eventData: any, handler: (eventObject: JQueryEventObject) => any): JQuery;
+   focusout(handler: (eventObject: JQueryEventObject) => any): JQuery;
+
+   hover(handlerIn: (eventObject: JQueryEventObject) => any, handlerOut: (eventObject: JQueryEventObject) => any): JQuery;
+   hover(handlerInOut: (eventObject: JQueryEventObject) => any): JQuery;
+
+   keydown(eventData?: any, handler?: (eventObject: JQueryEventObject) => any): JQuery;
+   keydown(handler: (eventObject: JQueryEventObject) => any): JQuery;
+
+   keypress(eventData?: any, handler?: (eventObject: JQueryEventObject) => any): JQuery;
+   keypress(handler: (eventObject: JQueryEventObject) => any): JQuery;
+
+   keyup(eventData?: any, handler?: (eventObject: JQueryEventObject) => any): JQuery;
+   keyup(handler: (eventObject: JQueryEventObject) => any): JQuery;
+
+   mousedown(eventData: any, handler: (eventObject: JQueryEventObject) => any): JQuery;
+   mousedown(handler: (eventObject: JQueryEventObject) => any): JQuery;
+
+   mouseevent(eventData: any, handler: (eventObject: JQueryEventObject) => any): JQuery;
+   mouseevent(handler: (eventObject: JQueryEventObject) => any): JQuery;
+
+   mouseenter(eventData: any, handler: (eventObject: JQueryEventObject) => any): JQuery;
+   mouseenter(handler: (eventObject: JQueryEventObject) => any): JQuery;
+
+   mouseleave(eventData: any, handler: (eventObject: JQueryEventObject) => any): JQuery;
+   mouseleave(handler: (eventObject: JQueryEventObject) => any): JQuery;
+
+   mousemove(eventData: any, handler: (eventObject: JQueryEventObject) => any): JQuery;
+   mousemove(handler: (eventObject: JQueryEventObject) => any): JQuery;
+
+   mouseout(eventData: any, handler: (eventObject: JQueryEventObject) => any): JQuery;
+   mouseout(handler: (eventObject: JQueryEventObject) => any): JQuery;
+
+   mouseover(eventData: any, handler: (eventObject: JQueryEventObject) => any): JQuery;
+   mouseover(handler: (eventObject: JQueryEventObject) => any): JQuery;
+
+   mouseup(eventData: any, handler: (eventObject: JQueryEventObject) => any): JQuery;
+   mouseup(handler: (eventObject: JQueryEventObject) => any): JQuery;
+
+   off(events?: string, selector?: any, handler?: (eventObject: JQueryEventObject) => any): JQuery;
+   off(eventsMap: { [key: string]: any; }, selector?: any): JQuery;
+
+   on(events: string, selector?: any, data?: any, handler?: (eventObject: JQueryEventObject) => any): JQuery;
+   on(eventsMap: { [key: string]: any; }, selector?: any, data?: any): JQuery;
+
+   one(events: string, selector?: any, data?: any, handler?: (eventObject: JQueryEventObject) => any): JQuery;
+   one(eventsMap: { [key: string]: any; }, selector?: any, data?: any): JQuery;
+
+   ready(handler: any): JQuery;
+
+   resize(eventData?: any, handler?: (eventObject: JQueryEventObject) => any): JQuery;
+   resize(handler: (eventObject: JQueryEventObject) => any): JQuery;
+
+   scroll(eventData?: any, handler?: (eventObject: JQueryEventObject) => any): JQuery;
+   scroll(handler: (eventObject: JQueryEventObject) => any): JQuery;
+
+   select(eventData?: any, handler?: (eventObject: JQueryEventObject) => any): JQuery;
+   select(handler: (eventObject: JQueryEventObject) => any): JQuery;
+
+   submit(eventData?: any, handler?: (eventObject: JQueryEventObject) => any): JQuery;
+   submit(handler: (eventObject: JQueryEventObject) => any): JQuery;
+
+   trigger(eventType: string, ...extraParameters: any[]): JQuery;
+   trigger(event: JQueryEventObject): JQuery;
+
+   triggerHandler(eventType: string, ...extraParameters: any[]): Object;
+
+   unbind(eventType?: string, handler?: (eventObject: JQueryEventObject) => any): JQuery;
+   unbind(eventType: string, fls: bool): JQuery;
+   unbind(evt: any): JQuery;
+
+   undelegate(): JQuery;
+   undelegate(selector: any, eventType: string, handler?: (eventObject: JQueryEventObject) => any): JQuery;
+   undelegate(selector: any, events: any): JQuery;
+   undelegate(namespace: string): JQuery;
+
+   /*********
+    INTERNALS
+   **********/
+   
+   context: Element;
+   jquery: string;
+   pushStack(elements: any[]): JQuery;
+   pushStack(elements: any[], name: any, arguments: any): JQuery;
+
+   /************
+    MANIPULATION
+   *************/
+   after(...content: any[]): JQuery;
+   after(func: (index: any) => any);
+
+   append(...content: any[]): JQuery;
+   append(func: (index: any, html: any) => any);
+
+   appendTo(target: any): JQuery;
+
+   before(...content: any[]): JQuery;
+   before(func: (index: any) => any);
+
+   clone(withDataAndEvents?: bool, deepWithDataAndEvents?: bool): JQuery;
+
+   detach(selector?: any): JQuery;
+
+   empty(): JQuery;
+
+   insertAfter(target: any): JQuery;
+   insertBefore(target: any): JQuery;
+
+   prepend(...content: any[]): JQuery;
+   prepend(func: (index: any, html: any) =>any): JQuery;
+
+   prependTo(target: any): JQuery;
+
+   remove(selector?: any): JQuery;
+
+   replaceAll(target: any): JQuery;
+
+   replaceWith(func: any): JQuery;
+   
+   text(textString: string): JQuery;
+   text(): string;
+
+   toArray(): any[];
+
+   unwrap(): JQuery;
+
+   wrap(wrappingElement: any): JQuery;
+   wrap(func: (index: any) =>any): JQuery;
+
+   wrapAll(wrappingElement: any): JQuery;
+
+   wrapInner(wrappingElement: any): JQuery;
+   wrapInner(func: (index: any) =>any): JQuery;
+
+   /*************
+    MISCELLANEOUS
+   **************/
+   each(func: (index: any, elem: Element) => JQuery);
+   
+   get(index?: number): any;
+   
+   index(selectorOrElement?: any): number;
+
+   /**********
+    PROPERTIES
+   ***********/
+   length: number;
+   [x: string]: HTMLElement;
+   [x: number]: HTMLElement;
+
+   /**********
+    TRAVERSING
+   ***********/
+   add(selector: string, context?: any): JQuery;
+   add(...elements: any[]): JQuery;
+   add(html: string): JQuery;
+   add(obj: JQuery): JQuery;
+
+   andSelf(): JQuery;
+
+   children(selector?: any): JQuery;
+
+   closest(selector: string): JQuery;
+   closest(selector: string, context?: Element): JQuery;
+   closest(obj: JQuery): JQuery;
+   closest(element: any): JQuery;
+   closest(selectors: any, context?: Element): any[];
+
+   contents(): JQuery;
+
+   end(): JQuery;
+
+   eq(index: number): JQuery;
+
+   filter(selector: string): JQuery;
+   filter(func: (index: any) =>any): JQuery;
+   filter(element: any): JQuery;
+   filter(obj: JQuery): JQuery;
+
+   find(selector: string): JQuery;
+   find(element: any): JQuery;
+   find(obj: JQuery): JQuery;
+
+   first(): JQuery;
+
+   has(selector: string): JQuery;
+   has(contained: Element): JQuery;
+
+   is(selector: string): bool;
+   is(func: (index: any) =>any): bool;
+   is(element: any): bool;
+   is(obj: JQuery): bool;
+
+   last(): JQuery;
+
+   map(callback: (index: any, domElement: Element) =>any): JQuery;
+
+   next(selector?: string): JQuery;
+   
+   nextAll(selector?: string): JQuery;
+
+   nextUntil(selector?: string, filter?: string): JQuery;
+   nextUntil(element?: Element, filter?: string): JQuery;
+
+   not(selector: string): JQuery;
+   not(func: (index: any) =>any): JQuery;
+   not(element: any): JQuery;
+   not(obj: JQuery): JQuery;
+
+   offsetParent(): JQuery;
+
+   parent(selector?: string): JQuery;
+
+   parents(selector?: string): JQuery;
+
+   parentsUntil(selector?: string, filter?: string): JQuery;
+   parentsUntil(element?: Element, filter?: string): JQuery;
+
+   prev(selector?: string): JQuery;
+
+   prevAll(selector?: string): JQuery;
+
+   prevUntil(selector?: string, filter?:string): JQuery;
+   prevUntil(element?: Element, filter?:string): JQuery;
+
+   siblings(selector?: string): JQuery;
+
+   slice(start: number, end?: number): JQuery;
+
+   /*********
+    UTILITIES
+   **********/
+   
+   queue(queueName?: string): any[];
+   queue(queueName: string, newQueueOrCallback: any): JQuery;
+   queue(newQueueOrCallback: any): JQuery;
+}
+
+declare var jQuery: JQueryStatic;
+declare var $: JQueryStatic;
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+Db.Orders2
+1
+
+//HTTP: consume /api/orders REST service
+module Db {
+	export class Orders {
+		constructor(public $http: ng.Http) { }
+		public List(success) {
+			this.$http.get('/api/orders').success(success).error(ErrorHandler);
+		}
+		public Delete(id, success) {
+			this.$http.delete('/api/orders/' + id).success(success).error(ErrorHandler);
+		}
+		public Create() {
+			var order = new Order();
+			order.Items = [];
+			return order;
+		}
+		public Save(order:Order, success) {
+			this.$http.post('/api/orders', order).success(success).error(ErrorHandler);
+		}
+		public Load(id, success) {
+			this.$http.get('/api/orders/' + id).success(function (order) {
+				order.Date = parseISO8601(order.Date);
+				success(order);
+			}).error(ErrorHandler);
+		}
+		public Update(order:Order, success) {
+			this.$http.put('/api/orders/'+order.OrderId, order).success(success).error(ErrorHandler);
+		}
+		public CreateItem(order:Order) {
+			var item = new OrderItem();
+			item.Description = "test";
+			item.Amount = 0.0;
+			order.Items.push(item);
+		}
+		public RemoveItem(order:Order, index) {
+			order.Items.splice(index, 1);
+		}
+		public GetTotal(order:Order) {
+			if (!order.Items) return 0;
+			return order.Items.reduce(function (value, item: OrderItem) {
+				return value + item.Amount;
+			}, 0);
+		}
+	}
+}
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+Db.tt
+1
+<#@ template language="C#" debug="true" hostspecific="true" #>
+<#@ output extension=".ts" #>
+<#@ assembly name="System.Core" #>
+<#@ assembly name="Microsoft.VisualStudio.Shell.Interop.8.0" #>
+<#@ assembly name="EnvDTE" #>
+<#@ assembly name="EnvDTE80" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ import namespace="System.IO" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="Microsoft.VisualStudio.Shell.Interop" #>
+<#@ import namespace="EnvDTE" #>
+<#@ import namespace="EnvDTE80" #>
+<#@ import namespace="Microsoft.VisualStudio.TextTemplating" #>
+<#
+	//Write out the template file
+	PrepareDataToRender(this);
+	foreach (var item in Data) {
+		WriteLine(item.ToString());
+	}
+	WriteLine("");
+	WriteLine("module Db {");
+	foreach (var cls in Classes) {
+		if (!cls.ProjectItem.FileNames[0].Contains("Models.cs")) continue;
+		if (cls.Name.Contains("OrderDb")) continue;
+		WriteLine("");
+		WriteLine("\texport class " + cls.Name + " {");
+		foreach (var prop in cls.Members.OfType<CodeProperty2>()) {
+			var type = GetType(prop.Type.AsString);
+			if (type == null) continue;
+			WriteLine("\t\t" + prop.Name + ": " + type + ";");
+		}
+		WriteLine("\t}");
+	}
+	WriteLine("");
+	WriteLine("}");
+#>
+<#+
+
+//These functions process the project to find all the classes
+static DTE Dte;
+static Project Project;
+static List<Object> Data = new List<Object>();
+static List<CodeClass2> Classes = new List<CodeClass2>();
+
+void PrepareDataToRender(TextTransformation tt) {
+
+	// Get the DTE service from the host
+	var serviceProvider = Host as IServiceProvider;
+	if (serviceProvider != null) {
+		Dte = serviceProvider.GetService(typeof(SDTE)) as DTE;
+	}
+
+	// Fail if we couldn't get the DTE. This can happen when trying to run in TextTransform.exe
+	if (Dte == null) {
+		throw new Exception("T4MVC can only execute through the Visual Studio host");
+	}
+
+	Project = GetProjectContainingT4File(Dte);
+
+	if (Project == null) {
+		Error("Could not find the VS Project containing the T4 file.");
+		return;
+	}
+
+	ProcessItems(Project.ProjectItems);
+}
+
+Project GetProjectContainingT4File(DTE dte) {
+
+	// Find the .tt file's ProjectItem
+	ProjectItem projectItem = dte.Solution.FindProjectItem(Host.TemplateFile);
+
+	// If the .tt file is not opened, open it
+	if (projectItem.Document == null)
+		projectItem.Open(Constants.vsViewKindCode);
+
+	return projectItem.ContainingProject;
+}
+
+void ProcessItems(ProjectItems items) {
+	if (items == null) return;
+	foreach (ProjectItem item in items) {
+		ProcessItem(item);
+		ProcessItems(item.ProjectItems);
+	}
+}
+
+void ProcessItem(ProjectItem projectItem) {
+	//try {
+		if (projectItem.FileCodeModel == null) 
+			return;
+		//Data.Add(projectItem.Name);
+		ProcessElements(projectItem.FileCodeModel.CodeElements);
+	//} catch {}
+}
+
+void ProcessElements(CodeElements elements) {
+	foreach (CodeElement e in elements) {
+		try {
+			if (e is CodeClass2) {
+				//Data.Add(e.Name);
+				Classes.Add((CodeClass2)e);
+			}
+			ProcessElements(e.Children);
+		} catch {}
+	}
+}
+
+string GetType(string name) {
+	switch (name) {
+		case "int": return "number";
+		case "decimal": return "number";
+		case "string": return "string";
+		case "System.DateTime": return "any";
+		case "bool": return "bool";
+	}
+	if (name.Contains("List<")) {
+		var start = name.IndexOf("<") + 1;
+		var type = name.Substring(start, name.IndexOf(">") - start);
+		return CleanTypeName(type) + "[]";
+	}
+	return null;
+}
+
+string CleanTypeName(string name) {
+	return name.Split('.').Last();
+}
+
+#>
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+EditCtrl
+1
+
+//CONTROLLER: Edit
+function EditCtrl($scope, $location: ng.Location, $routeParams, Orders: Db.Orders) {
+	var isnew = !$routeParams.id;
+	$scope.Model = {};
+	if (isnew) {
+		$scope.Model = Orders.Create();
+		$scope.Save = function () {
+			Orders.Save($scope.Model, function () {
+				$location.path("/list");
+			});
+		};
+	} else {
+		Orders.Load($routeParams.id, function (data) { 
+			$scope.Model = data;
+		});
+		$scope.Save = function () {
+			Orders.Update($scope.Model.OrderId, $scope.Model, function () {
+				$location.path("/list");
+			});
+		};
+	}
+	$scope.Add = function () {
+		Orders.CreateItem($scope.Model);
+	};
+	$scope.Remove = function (index) {
+		Orders.RemoveItem($scope.Model, index);
+		$scope.$apply();
+	};
+	$scope.Total = function () {
+		return Orders.GetTotal($scope.Model);
+	};
+}
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+edit.htm
+1
+
+<div class="form-horizontal well ng-cloak" ng-controller="EditCtrl">
+	<div>
+		Name: <input type='text' ng-model="Model.Name" />
+		Date: <input type='text' ng-model='Model.Date'  />
+		Paid: <input type='checkbox' ng-model="Model.Paid" />
+	</div>
+	<blockquote>
+		<h5>Items:</h5>
+		<div ng-repeat="item in Model.Items">
+			Item: <input ng-model="item.Description" />
+			Amount: <input type="number" ng-model="item.Amount" />
+			<button class="btn-small" confirm="Remove($index)" confirm-msg='Are you sure you want to remove?'>
+				<i class="icon-trash"></i>
+			</button>
+		</div>
+		<button ng-click="Add()" class="btn-small">
+			<i class="icon-plus"></i>Add
+		</button>
+	</blockquote>
+	<div>Total: {{ Total() | currency }}</div>
+	<button ng-click="Save()" class="btn">
+		<i class="icon-check"></i>Save
+	</button>
+</div>
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+Angular-UI
+1
+
+	<link href="//ajax.googleapis.com/ajax/libs/jqueryui/1.9.0/themes/ui-lightness/jquery-ui.css" rel="stylesheet" />
+	<link href="/Content/angular-ui.min.css" rel="stylesheet" />
+
+	<script src="//ajax.googleapis.com/ajax/libs/jquery/1.8.3/jquery.min.js"></script>
+	<script src="//ajax.googleapis.com/ajax/libs/jqueryui/1.9.2/jquery-ui.min.js"></script>
+	<script src="//ajax.googleapis.com/ajax/libs/angularjs/1.0.1/angular.min.js"></script>
+	<script src='/Content/angular-ui.min.js'></script>
+
+
+var myApp = angular.module('myApp', ['ui.directives']);
+
+ui-date
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+angular-ui.min.css
+1
+.ui-resetwrap{position:relative;display:inline-block}.ui-reset{position:absolute;top:0;right:0;z-index:2;display:none;height:100%;cursor:pointer}.ui-resetwrap:hover .ui-reset{display:block}.ui-currency-pos{color:green}.ui-currency-neg{color:red}.ui-currency-zero{color:blue}.ui-currency-pos.ui-bignum,.ui-currency-neg.ui-smallnum{font-size:110%}.ui-match{background:yellow}
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+angular-ui.min.js
+1
+/**
+ * AngularUI - The companion suite for AngularJS
+ * @version v0.3.2 - 2012-12-04
+ * @link http://angular-ui.github.com
+ * @license MIT License, http://www.opensource.org/licenses/MIT
+ */
+angular.module("ui.config", []).value("ui.config", {}), angular.module("ui.filters", ["ui.config"]), angular.module("ui.directives", ["ui.config"]), angular.module("ui", ["ui.filters", "ui.directives", "ui.config"]), angular.module("ui.directives").directive("uiSortable", ["ui.config", function (e) { var t; return t = {}, e.sortable != null && angular.extend(t, e.sortable), { require: "?ngModel", link: function (e, n, r, i) { var s, o, u, a, f; return u = angular.extend({}, t, e.$eval(r.uiOptions)), i != null && (s = function (e, t) { return t.item.data("ui-sortable-start", t.item.index()) }, o = function (t, n) { var r, s; return s = n.item.data("ui-sortable-start"), r = n.item.index(), i.$modelValue.splice(r, 0, i.$modelValue.splice(s, 1)[0]), e.$apply() }, a = u.start, u.start = function (t, n) { return s(t, n), typeof a == "function" && a(t, n), e.$apply() }, f = u.update, u.update = function (t, n) { return o(t, n), typeof f == "function" && f(t, n), e.$apply() }), n.sortable(u) } } }]), angular.module("ui.directives").directive("uiJq", ["ui.config", function (e) { return { restrict: "A", compile: function (t, n) { if (!angular.isFunction(t[n.uiJq])) throw new Error('ui-jq: The "' + n.uiJq + '" function does not exist'); var r = e.jq && e.jq[n.uiJq]; return function (e, t, n) { var i = [], s = "change"; n.uiOptions ? (i = e.$eval("[" + n.uiOptions + "]"), angular.isObject(r) && angular.isObject(i[0]) && (i[0] = angular.extend(r, i[0]))) : r && (i = [r]), n.ngModel && t.is("select,input,textarea") && (i && angular.isObject(i[0]) && i[0].ngChange !== undefined && (s = i[0].ngChange), s && t.on(s, function () { t.trigger("input") })), t[n.uiJq].apply(t, i) } } } }]), angular.module("ui.directives").directive("uiEvent", ["$parse", function (e) { return function (t, n, r) { var i = t.$eval(r.uiEvent); angular.forEach(i, function (r, i) { var s = e(r); n.bind(i, function (e) { var n = Array.prototype.slice.call(arguments); n = n.splice(1), t.$apply(function () { s(t, { $event: e, $params: n }) }) }) }) } }]), angular.module("ui.directives").directive("uiMask", [function () { return { require: "ngModel", link: function (e, t, n, r) { r.$render = function () { var i = r.$viewValue || ""; t.val(i), t.mask(e.$eval(n.uiMask)) }, r.$parsers.push(function (e) { var n = t.isMaskValid() || angular.isUndefined(t.isMaskValid()) && t.val().length > 0; return r.$setValidity("mask", n), n ? e : undefined }), t.bind("keyup", function () { e.$apply(function () { r.$setViewValue(t.mask()) }) }) } } }]), angular.module("ui.directives").directive("uiModal", ["$timeout", function (e) { return { restrict: "EAC", require: "ngModel", link: function (t, n, r, i) { n.addClass("modal hide"), n.on("shown", function () { n.find("[autofocus]").focus() }), t.$watch(r.ngModel, function (e) { n.modal(e && "show" || "hide") }), n.on(jQuery.support.transition && "shown" || "show", function () { e(function () { i.$setViewValue(!0) }) }), n.on(jQuery.support.transition && "hidden" || "hide", function () { e(function () { i.$setViewValue(!1) }) }) } } }]), angular.module("ui.directives").directive("uiReset", ["ui.config", function (e) { var t = null; return e.reset !== undefined && (t = e.reset), { require: "ngModel", link: function (e, n, r, i) { var s; s = angular.element('<a class="ui-reset" />'), n.wrap('<span class="ui-resetwrap" />').after(s), s.bind("click", function (n) { n.preventDefault(), e.$apply(function () { r.uiReset ? i.$setViewValue(e.$eval(r.uiReset)) : i.$setViewValue(t), i.$render() }) }) } } }]), function () { function t(e, t, n, r) { angular.forEach(t.split(" "), function (t) { var i = { type: "map-" + t }; google.maps.event.addListener(n, t, function (t) { r.trigger(angular.extend({}, i, t)), e.$$phase || e.$apply() }) }) } function n(n, r) { e.directive(n, [function () { return { restrict: "A", link: function (e, i, s) { e.$watch(s[n], function (n) { t(e, r, n, i) }) } } }]) } var e = angular.module("ui.directives"); e.directive("uiMap", ["ui.config", "$parse", function (e, n) { var r = "bounds_changed center_changed click dblclick drag dragend dragstart heading_changed idle maptypeid_changed mousemove mouseout mouseover projection_changed resize rightclick tilesloaded tilt_changed zoom_changed", i = e.map || {}; return { restrict: "A", link: function (e, s, o) { var u = angular.extend({}, i, e.$eval(o.uiOptions)), a = new google.maps.Map(s[0], u), f = n(o.uiMap); f.assign(e, a), t(e, r, a, s) } } }]), e.directive("uiMapInfoWindow", ["ui.config", "$parse", "$compile", function (e, n, r) { var i = "closeclick content_change domready position_changed zindex_changed", s = e.mapInfoWindow || {}; return { link: function (e, o, u) { var a = angular.extend({}, s, e.$eval(u.uiOptions)); a.content = o[0]; var f = n(u.uiMapInfoWindow), l = f(e); l || (l = new google.maps.InfoWindow(a), f.assign(e, l)), t(e, i, l, o), o.replaceWith("<div></div>"); var c = l.open; l.open = function (n, i, s, u, a, f) { r(o.contents())(e), c.call(l, n, i, s, u, a, f) } } } }]), n("uiMapMarker", "animation_changed click clickable_changed cursor_changed dblclick drag dragend draggable_changed dragstart flat_changed icon_changed mousedown mouseout mouseover mouseup position_changed rightclick shadow_changed shape_changed title_changed visible_changed zindex_changed"), n("uiMapPolyline", "click dblclick mousedown mousemove mouseout mouseover mouseup rightclick"), n("uiMapPolygon", "click dblclick mousedown mousemove mouseout mouseover mouseup rightclick"), n("uiMapRectangle", "bounds_changed click dblclick mousedown mousemove mouseout mouseover mouseup rightclick"), n("uiMapCircle", "center_changed click dblclick mousedown mousemove mouseout mouseover mouseup radius_changed rightclick"), n("uiMapGroundOverlay", "click dblclick") }(), angular.module("ui.directives").factory("keypressHelper", ["$parse", function (t) { var n = { 8: "backspace", 9: "tab", 13: "enter", 27: "esc", 32: "space", 33: "pageup", 34: "pagedown", 35: "end", 36: "home", 37: "left", 38: "up", 39: "right", 40: "down", 45: "insert", 46: "delete" }, r = function (e) { return e.charAt(0).toUpperCase() + e.slice(1) }; return function (e, i, s, o) { var u, a = []; u = i.$eval(o["ui" + r(e)]), angular.forEach(u, function (e, n) { var r, i; i = t(e), angular.forEach(n.split(" "), function (e) { r = { expression: i, keys: {} }, angular.forEach(e.split("-"), function (e) { r.keys[e] = !0 }), a.push(r) }) }), s.bind(e, function (t) { var r = t.metaKey || t.altKey, s = t.ctrlKey, o = t.shiftKey, u = t.keyCode; e === "keypress" && !o && u >= 97 && u <= 122 && (u -= 32), angular.forEach(a, function (e) { var u = e.keys[n[t.keyCode]] || e.keys[t.keyCode.toString()] || !1, a = e.keys.alt || !1, f = e.keys.ctrl || !1, l = e.keys.shift || !1; u && a == r && f == s && l == o && i.$apply(function () { e.expression(i, { $event: t }) }) }) }) } }]), angular.module("ui.directives").directive("uiKeydown", ["keypressHelper", function (e) { return { link: function (t, n, r) { e("keydown", t, n, r) } } }]), angular.module("ui.directives").directive("uiKeypress", ["keypressHelper", function (e) { return { link: function (t, n, r) { e("keypress", t, n, r) } } }]), angular.module("ui.directives").directive("uiKeyup", ["keypressHelper", function (e) { return { link: function (t, n, r) { e("keyup", t, n, r) } } }]), angular.module("ui.directives").directive("uiValidate", function () { return { restrict: "A", require: "ngModel", link: function (e, t, n, r) { var i, s = n.uiValidate; s = e.$eval(s); if (!s) return; angular.isFunction(s) && (s = { validator: s }), angular.forEach(s, function (e, t) { i = function (n) { return e(n) ? (r.$setValidity(t, !0), n) : (r.$setValidity(t, !1), undefined) }, r.$formatters.push(i), r.$parsers.push(i) }) } } }), angular.module("ui.directives").directive("uiAnimate", ["ui.config", "$timeout", function (e, t) { var n = {}; return angular.isString(e.animate) ? n["class"] = e.animate : e.animate && (n = e.animate), { restrict: "A", link: function (e, r, i) { var s = {}; i.uiAnimate && (s = e.$eval(i.uiAnimate), angular.isString(s) && (s = { "class": s })), s = angular.extend({ "class": "ui-animate" }, n, s), r.addClass(s["class"]), t(function () { r.removeClass(s["class"]) }, 20, !1) } } }]), angular.module("ui.directives").directive("uiSelect2", ["ui.config", "$http", function (e, t) { var n = {}; return e.select2 && angular.extend(n, e.select2), { require: "?ngModel", compile: function (e, t) { var r, i, s, o = e.is("select"), u = t.multiple !== undefined; return e.is("select") && (i = e.find("option[ng-repeat], option[data-ng-repeat]"), i.length && (s = i.attr("ng-repeat") || i.attr("data-ng-repeat"), r = jQuery.trim(s.split("|")[0]).split(" ").pop())), function (e, t, i, s) { var a = angular.extend({}, n, e.$eval(i.uiSelect2)); o ? (delete a.multiple, delete a.initSelection) : u && (a.multiple = !0); if (s) { s.$render = function () { o ? t.select2("val", s.$modelValue) : u && !s.$modelValue ? t.select2("data", []) : t.select2("data", s.$modelValue) }, r && e.$watch(r, function (e, n, r) { if (!e) return; setTimeout(function () { t.select2("val", s.$viewValue), t.trigger("change") }) }); if (!o) { t.bind("change", function () { e.$apply(function () { s.$setViewValue(t.select2("data")) }) }); if (a.initSelection) { var f = a.initSelection; a.initSelection = function (e, t) { f(e, function (e) { s.$setViewValue(e), t(e) }) } } } } i.$observe("disabled", function (e) { t.select2(e && "disable" || "enable") }), e.$watch(i.ngMultiple, function (e) { t.select2(a) }), t.val(e.$eval(i.ngModel)), setTimeout(function () { t.select2(a) }) } } } }]), angular.module("ui.directives").directive("uiCodemirror", ["ui.config", "$parse", function (e, t) { "use strict"; return e.codemirror = e.codemirror || {}, { require: "ngModel", link: function (n, r, i, s) { if (!r.is("textarea")) throw new Error("ui-codemirror can only be applied to a textarea element"); var o, u = t(i.uiCodemirror), a = function (e) { var t = e.getValue(); t !== s.$viewValue && (s.$setViewValue(t), n.$apply()) }, f = function (t) { t = angular.extend({}, t, e.codemirror); var n = t.onChange; n ? t.onChange = function (e) { a(e), n(e) } : t.onChange = a, o && o.toTextArea(), o = CodeMirror.fromTextArea(r[0], t) }; f(u()), n.$watch(u, f, !0), s.$formatters.push(function (e) { if (angular.isUndefined(e) || e === null) return ""; if (angular.isObject(e) || angular.isArray(e)) throw new Error("ui-codemirror cannot use an object or an array as a model"); return e }), s.$render = function () { o.setValue(s.$viewValue) } } } }]), angular.module("ui.directives").directive("uiTinymce", ["ui.config", function (e) { return e.tinymce = e.tinymce || {}, { require: "ngModel", link: function (t, n, r, i) { var s, o = { onchange_callback: function (e) { e.isDirty() && (e.save(), i.$setViewValue(n.val()), t.$$phase || t.$apply()) }, handle_event_callback: function (e) { return this.isDirty() && (this.save(), i.$setViewValue(n.val()), t.$$phase || t.$apply()), !0 }, setup: function (e) { e.onSetContent.add(function (e, r) { e.isDirty() && (e.save(), i.$setViewValue(n.val()), t.$$phase || t.$apply()) }) } }; r.uiTinymce ? s = t.$eval(r.uiTinymce) : s = {}, angular.extend(o, e.tinymce, s), setTimeout(function () { n.tinymce(o) }) } } }]), angular.module("ui.directives").directive("uiIf", [function () { return { transclude: "element", priority: 1e3, terminal: !0, restrict: "A", compile: function (e, t, n) { return function (e, t, r) { t[0].doNotMove = !0; var i = r.uiIf, s, o; e.$watch(i, function (r) { s && (s.remove(), s = null), o && (o.$destroy(), o = null), r && (o = e.$new(), n(o, function (e) { s = e, t.after(e) })), t.parent().trigger("$childrenChanged") }) } } } }]), angular.module("ui.directives").directive("uiScrollfix", ["$window", function (e) { "use strict"; return { link: function (t, n, r) { var i = n.offset().top; r.uiScrollfix ? r.uiScrollfix.charAt(0) === "-" ? r.uiScrollfix = i - r.uiScrollfix.substr(1) : r.uiScrollfix.charAt(0) === "+" && (r.uiScrollfix = i + parseFloat(r.uiScrollfix.substr(1))) : r.uiScrollfix = i, angular.element(e).on("scroll.ui-scrollfix", function () { var t; if (angular.isDefined(e.pageYOffset)) t = e.pageYOffset; else { var i = document.compatMode && document.compatMode !== "BackCompat" ? document.documentElement : document.body; t = i.scrollTop } !n.hasClass("ui-scrollfix") && t > r.uiScrollfix ? n.addClass("ui-scrollfix") : n.hasClass("ui-scrollfix") && t < r.uiScrollfix && n.removeClass("ui-scrollfix") }) } } }]), angular.module("ui.directives").directive("uiCalendar", ["ui.config", "$parse", function (e, t) { return e.uiCalendar = e.uiCalendar || {}, { require: "ngModel", restrict: "A", scope: { events: "=ngModel" }, link: function (n, r, i) { function o() { var t, s = { header: { left: "prev,next today", center: "title", right: "month,agendaWeek,agendaDay" }, eventMouseover: function (e, t, n) { n.name !== "agendaDay" && $(t.target).attr("title", e.title) }, events: n.events }; i.uiCalendar ? t = n.$eval(i.uiCalendar) : t = {}, angular.extend(s, e.uiCalendar, t), r.html("").fullCalendar(s) } var s = t(i.ngModel); o(), n.$watch("events.length", function (e, t) { o() }, !0) } } }]), angular.module("ui.directives").directive("uiShow", [function () { return function (e, t, n) { e.$watch(n.uiShow, function (e, n) { e ? t.addClass("ui-show") : t.removeClass("ui-show") }) } }]).directive("uiHide", [function () { return function (e, t, n) { e.$watch(n.uiHide, function (e, n) { e ? t.addClass("ui-hide") : t.removeClass("ui-hide") }) } }]).directive("uiToggle", [function () { return function (e, t, n) { e.$watch(n.uiToggle, function (e, n) { e ? t.removeClass("ui-hide").addClass("ui-show") : t.removeClass("ui-show").addClass("ui-hide") }) } }]), angular.module("ui.directives").directive("uiCurrency", ["ui.config", "currencyFilter", function (e, t) { var n = { pos: "ui-currency-pos", neg: "ui-currency-neg", zero: "ui-currency-zero" }; return e.currency && angular.extend(n, e.currency), { restrict: "EAC", require: "ngModel", link: function (e, r, i, s) { var o, u, a; o = angular.extend({}, n, e.$eval(i.uiCurrency)), u = function (e) { var n; return n = e * 1, n > 0 ? r.addClass(o.pos) : r.removeClass(o.pos), n < 0 ? r.addClass(o.neg) : r.removeClass(o.neg), n === 0 ? r.addClass(o.zero) : r.removeClass(o.zero), e === "" ? r.text("") : r.text(t(n, o.symbol)), !0 }, s.$render = function () { a = s.$viewValue, r.val(a), u(a) } } } }]), angular.module("ui.directives").directive("uiDate", ["ui.config", function (e) { "use strict"; var t; return t = {}, angular.isObject(e.date) && angular.extend(t, e.date), { require: "?ngModel", link: function (t, n, r, i) { var s = function () { return angular.extend({}, e.date, t.$eval(r.uiDate)) }, o = function () { var e = s(); if (i) { var r = function () { t.$apply(function () { var e = n.datepicker("getDate"); n.datepicker("setDate", n.val()), i.$setViewValue(e) }) }; if (e.onSelect) { var o = e.onSelect; e.onSelect = function (e, t) { return r(), o(e, t) } } else e.onSelect = r; n.bind("change", r), i.$render = function () { var e = i.$viewValue; if (angular.isDefined(e) && e !== null && !angular.isDate(e)) throw new Error("ng-Model value must be a Date object - currently it is a " + typeof e + " - use ui-date-format to convert it from a string"); n.datepicker("setDate", e) } } n.datepicker("destroy"), n.datepicker(e), i.$render() }; t.$watch(s, o, !0) } } }]).directive("uiDateFormat", [function () { var e = { require: "ngModel", link: function (e, t, n, r) { if (n.uiDateFormat === "") r.$formatters.push(function (e) { if (angular.isString(e)) return new Date(e) }), r.$parsers.push(function (e) { if (e) return e.toISOString() }); else { var i = n.uiDateFormat; r.$formatters.push(function (e) { if (angular.isString(e)) return $.datepicker.parseDate(i, e) }), r.$parsers.push(function (e) { if (e) return $.datepicker.formatDate(i, e) }) } } }; return e }]), angular.module("ui.filters").filter("highlight", function () { return function (e, t, n) { return t || angular.isNumber(t) ? (e = e.toString(), t = t.toString(), n ? e.split(t).join('<span class="ui-match">' + t + "</span>") : e.replace(new RegExp(t, "gi"), '<span class="ui-match">$&</span>')) : e } }), angular.module("ui.filters").filter("format", function () { return function (e, t) { if (!e) return e; var n = e.toString(), r; return t === undefined ? n : !angular.isArray(t) && !angular.isObject(t) ? n.split("$0").join(t) : (r = angular.isArray(t) && "$" || ":", angular.forEach(t, function (e, t) { n = n.split(r + t).join(e) }), n) } }), angular.module("ui.filters").filter("unique", function () { return function (e, t) { if (t === !1) return e; if ((t || angular.isUndefined(t)) && angular.isArray(e)) { var n = {}, r = [], i = function (e) { return angular.isObject(e) && angular.isString(t) ? e[t] : e }; angular.forEach(e, function (e) { var t, n = !1; for (var s = 0; s < r.length; s++) if (angular.equals(i(r[s]), i(e))) { n = !0; break } n || r.push(e) }), e = r } return e } }), angular.module("ui.filters").filter("inflector", function () { function e(e) { return e.replace(/^([a-z])|\s+([a-z])/g, function (e) { return e.toUpperCase() }) } function t(e, t) { return e.replace(/[A-Z]/g, function (e) { return t + e }) } var n = { humanize: function (n) { return e(t(n, " ").split("_").join(" ")) }, underscore: function (e) { return e.substr(0, 1).toLowerCase() + t(e.substr(1), "_").toLowerCase().split(" ").join("_") }, variable: function (t) { return t = t.substr(0, 1).toLowerCase() + e(t.split("_").join(" ")).substr(1).split(" ").join(""), t } }; return function (e, t, r) { return t !== !1 && angular.isString(e) ? (t = t || "humanize", n[t](e)) : e } });
+
+<end node> 5P9i0s8y19Z
+dt=Text
+<node>
+oData
+1
+
+NUGET: Microsoft.AspNet.WebApi.OData
+
+
+[Queryable]
+
+
+		public List(success) {
+			this.$http.get('/api/orders?$orderby=Date).success(success).error(ErrorHandler);
+		}
+
+
+	$scope.Refresh = function () {
+		Orders.List($scope.OrderBy, function (orders) {
+			$scope.Model = orders;
+		});
+	};
+	$scope.$watch('OrderBy', function () {
+		$scope.Refresh();
+	});
+	$scope.OrderBy = 'Date';
+
+
+Sort: <select ng-model="OrderBy"><option>OrderId</option><option>Date</option></select>
+
+
+		public List(orderby, success) {
+			this.$http.get('/api/orders?$orderby='+orderby).success(success).error(ErrorHandler);
+		}
+
+<end node> 5P9i0s8y19Z

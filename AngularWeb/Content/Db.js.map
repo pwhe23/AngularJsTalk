@@ -1,0 +1,1 @@
+{"version":3,"file":"Db.js","sources":["Db.ts"],"names":["Db","Db.Order","Db.Order.constructor","Db.OrderItem","Db.Order.constructor"],"mappings":"AAAA,IACO,EAAE;AAgBR,CAhBD,UAAO,EAAE;IAERA;QAAAC;AAMCA,QAADA;AAACA,IAADA,CAACA,IAAAD;IANDA,iBAMCA,IAAAA;IAEDA;QAAAG;AAICA,QAADA;AAACA,IAADA,CAACA,IAAAH;IAJDA,yBAICA,IAAAA;AAEFA,CAACA;AAAA"}

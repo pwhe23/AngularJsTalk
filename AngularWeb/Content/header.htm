@@ -1,0 +1,11 @@
+
+<header class="jumbotron jumbotron1 subhead" ng-controller="HeaderCtrl">
+	<h1>Welcome to Angular</h1>
+	<navbar>
+		<a href='#/' class="brand">Orders</a>
+		<ul class="nav">
+			<li ng-class="{active: location.path() == '/list'}"><a href="#/list">List Orders</a></li>
+			<li ng-class="{active: location.path() == '/edit'}"><a href='#/edit' >Add Order</a></li>
+		</ul>
+	</navbar>
+</header>

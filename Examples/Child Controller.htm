@@ -1,0 +1,146 @@
+<!doctype html>
+<html ng-app>
+<!-- http://jsfiddle.net/pkozlowski_opensource/yGGL2/3/ -->
+<head>
+	<script src="http://ajax.googleapis.com/ajax/libs/angularjs/1.0.1/angular.min.js"></script>
+</head>
+<body>
+
+<style type='text/css'>
+.todo.done {text-decoration: line-through; color: gray;}
+.tasks { margin: 10px; }
+.stats { margin: 10px; }
+</style>
+
+<script type='text/javascript'>
+function TodosController($scope) {
+    $scope.estimates = [0, 1, 2, 3, 5, 8];
+
+    $scope.todos = [{
+        name: "Learn angular",
+        estimate: 8,
+        done: true},
+    {
+        name: "Install java",
+        estimate: 2,
+        done: false},
+    {
+        name: 'Uninstall ruby',
+        estimate: 3,
+        done: false}];
+        
+    $scope.addTodo = function() {
+        if ($scope.todoName === "") {
+            return false;
+        }
+
+        $scope.todos.push({
+            name: $scope.todoName,
+            estimate: $scope.todoEstimate,
+            done: false
+        });
+
+        $scope.todoName = '';
+        $scope.todoEstimate = 0;
+    }
+        
+    $scope.sum = function(list, done) {
+       var total = 0;
+       angular.forEach(list, function(item) {
+           if (item.done == done) total += item.estimate;
+       });
+       return total;    
+    }
+    
+}
+
+function TodoEditorController($scope) {
+    $scope.editorEnabled = false;
+
+    $scope.enableEditor = function() {
+        $scope.editorEnabled = true;
+
+        $scope.todoName = $scope.todo.name;
+        $scope.todoEstimate = $scope.todo.estimate;
+    },
+
+    $scope.disableEditor = function() {
+        $scope.editorEnabled = false;
+    },
+
+    $scope.save = function() {
+        if ($scope.todoName === "") {
+            return false;
+        }
+
+        $scope.todo.name = $scope.todoName;
+        $scope.todo.estimate = $scope.todoEstimate;
+
+        $scope.disableEditor();
+    }
+}
+
+
+</script>
+
+<div ng-app ng:controller="TodosController">
+    <input type="text" ng-model="todoName" size="30" placeholder="Enter your todo here" ng:required />
+    estimation:
+    <select name="todoEstimate">
+        <option ng:repeat="estimate in estimates" value="{{estimate}}">{{estimate}}</option>
+    </select>
+    <button ng:click="addTodo()">Add</button>
+    
+    <div class="tasks" ng:show="(todos | filter:{done: false} ).length > 0">
+        <b>Tasks to do:</b>
+        <ul ng:repeat="todo in todos | filter:{done: false}">
+            <li>              
+                <div ng:controller="TodoEditorController">
+                    <button ng:click="todos.splice($index, 1)">Delete</button>
+                    <button ng:click="todo.done = true">Done</button>
+                    <span ng:hide="editorEnabled" ng:click="enableEditor()">
+                        <b>{{todo.name}}</b> ({{todo.estimate}})
+                    </span>
+                    
+                    <span ng:show="editorEnabled">
+                        <input type="text" size="30" name="todoName" ng:required ng-model="todoName" />
+                        <select name="todoEstimate" ng-options="estm for estm in estimates" ng-model="todoEstimate">
+                        </select>
+                        
+                        <button ng:click="save()">Ok</button>
+                        <button ng:click="disableEditor()">Cancel</button>
+                    </span>
+                </div>
+                
+            </li>
+        </ul>
+        Total estimation: {{ sum(todos, false)}}
+    </div>
+    
+    <div class="tasks" ng:show="(todos | filter:{done: true} ).length > 0">
+        <b>Done tasks:</b>
+        <ul ng:repeat="todo in todos | filter:{done: true}">
+            <li>
+                <button ng:click="todos.splice($index, 1)">Delete</button>
+                <button ng:click="todo.done = false">Not done</button>
+                
+                <span class="todo done"><b>{{todo.name}}</b> ({{todo.estimate}})</span>
+            </li>
+        </ul>
+        Total estimation: {{sum(todos, true)}}
+    </div>
+    
+    <div class="stats">
+        <div>All: {{todos.length}}</div>
+        <div>Incomplete: {{(todos | filter:{done: false}).length}}</div>
+        <div>Done: {{(todos | filter:{done: true}).length}}</div>
+    </div>
+    
+    <hr />
+    Debug view:
+    <pre>
+        todos = {{todos}}
+    </pre>
+
+</body>
+</html>

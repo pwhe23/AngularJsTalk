@@ -1,0 +1,25 @@
+
+<div class="form-horizontal well ng-cloak" ng-controller="EditCtrl">
+	<div>
+		Name: <input type='text' ng-model="Model.Name" />
+		Date: <input type='text' ng-model='Model.Date' ui-date />
+		Paid: <input type='checkbox' ng-model="Model.Paid" />
+	</div>
+	<blockquote>
+		<h5>Items:</h5>
+		<div ng-repeat="item in Model.Items">
+			Item: <input ng-model="item.Description" />
+			Amount: <input type="number" ng-model="item.Amount" />
+			<button class="btn-small" confirm="Remove($index)" confirm-msg='Are you sure you want to remove?'>
+				<i class="icon-trash"></i>
+			</button>
+		</div>
+		<button ng-click="Add()" class="btn-small">
+			<i class="icon-plus"></i>Add
+		</button>
+	</blockquote>
+	<div>Total: {{ Total() | currency }}</div>
+	<button ng-click="Save()" class="btn">
+		<i class="icon-check"></i>Save
+	</button>
+</div>

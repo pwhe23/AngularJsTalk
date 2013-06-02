@@ -1,0 +1,32 @@
+
+<div class="form-horizontal well" ng-controller="ListCtrl">
+	<table class="table table-bordered table-striped table-hover ng-cloak">
+		<thead>
+			<tr><th>Paid</th><th>Date</th><th>Name</th><th>Actions</th></tr>
+		</thead>
+		<tbody>
+			<tr ng-repeat="item in filtered = (Model | filter:whereFilter)">
+				<td>{{ item.Paid | checkmark }}</td>
+				<td>{{ item.Date | strToDate | date:'MM/dd/yyyy' }}</td>
+				<td><a href="#/edit/{{ item.OrderId }}">{{ item.Name }}</a></td>
+				<td>
+					<button class="btn-mini" confirm="Delete(item.OrderId)" confirm-msg="{{'Delete this: '+item.Name}}">
+						<i class="icon-trash"></i>
+					</button>
+				</td>
+			</tr>
+		</tbody>
+		<tfoot>
+			<tr>
+				<td colspan="4">
+					Count: {{ filtered.length }}
+					<a class="btn" ng-class="{'btn-primary':Selected(undefined), disabled:Selected(undefined)}" ng-click="Where()">All</a>
+					<a class="btn" ng-class="{'btn-primary':Selected(true), disabled:Selected(true)}" ng-click="Where(true)">Paid</a>
+					<a class="btn" ng-class="{'btn-primary':Selected(false), disabled:Selected(false)}" ng-click="Where(false)">Unpaid</a>
+					Sort: <select ng-model="OrderBy"><option>OrderId</option><option>Date</option></select>
+				</td>
+			</tr>
+		</tfoot>
+
+	</table>
+</div>

@@ -1,0 +1,46 @@
+<!doctype html>
+<html ng-app='app'>
+<!-- http://jsfiddle.net/xncuF/ -->
+<head>
+	<script src="http://ajax.googleapis.com/ajax/libs/angularjs/1.0.1/angular.min.js"></script>
+</head>
+<body>
+
+<script type='text/javascript'>
+var app = angular.module('app', []);
+
+function MyCtrl($scope) {
+    $scope.currentPage = 0;
+    $scope.pageSize = 10;
+    $scope.data = [];
+    for (var i=0; i<49; i++) {
+        $scope.data.push("Item "+i);
+    }
+    $scope.numPages = function() {
+        return Math.ceil($scope.data.length / $scope.pageSize);
+    };
+}
+
+//We already have a limitTo filter built-in to angular,
+//let's make a startFrom filter
+app.filter('startFrom', function() {
+    return function(input, start) {
+        start = +start; //parse to int
+        return input.slice(start);
+    }
+});
+</script>
+
+<div ng-controller="MyCtrl">
+    <ul>
+        <li ng-repeat="item in data | startFrom:currentPage*pageSize | limitTo:pageSize">
+            {{item}}
+        </li>
+    </ul>
+    <button ng-disabled="currentPage == 0" ng-click="currentPage=currentPage-1">Previous</button>
+    {{currentPage+1}}/{{numPages()}}
+    <button ng-disabled="currentPage >= numPages()-1" ng-click="currentPage=currentPage+1">Next</button>
+</div>
+
+</body>
+</html>

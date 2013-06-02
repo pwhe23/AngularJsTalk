@@ -1,0 +1,39 @@
+<!doctype html>
+<html ng-app>
+<!-- http://jsfiddle.net/2Gqwg/57/ -->
+<head>
+	<script src="http://ajax.googleapis.com/ajax/libs/angularjs/1.0.1/angular.min.js"></script>
+</head>
+<body>
+
+<script type='text/javascript'>
+	function Controller($scope) {
+		$scope.log = function(m) {
+			console.log(m);
+		};
+		$scope.items = [1, 2, 3];
+	}
+</script>
+
+<div ng-controller="Controller">
+	<a ng:click="tpl='tpl1.html'">tpl1.html</a>
+	| <a ng:click="tpl='tpl2.html'">tpl2.html</a>
+
+	<h3>ng-include inside ng-repeat</h3>
+	<div ng-repeat="i in items">
+		<ng-include src="tpl" onload="log('onload inside repeater')"></ng-include>
+	</div>
+
+	<h3>just ng-include</h3>
+	<ng-include src="tpl" onload="log('onload')" />
+</div>
+
+<script type="text/ng-template" id="tpl1.html">
+  content 1
+</script>
+<script type="text/ng-template" id="tpl2.html">
+  content 2
+</script>
+
+</body>
+</html>

@@ -1,0 +1,129 @@
+<#@ template language="C#" debug="true" hostspecific="true" #>
+<#@ output extension=".ts" #>
+<#@ assembly name="System.Core" #>
+<#@ assembly name="Microsoft.VisualStudio.Shell.Interop.8.0" #>
+<#@ assembly name="EnvDTE" #>
+<#@ assembly name="EnvDTE80" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ import namespace="System.IO" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="Microsoft.VisualStudio.Shell.Interop" #>
+<#@ import namespace="EnvDTE" #>
+<#@ import namespace="EnvDTE80" #>
+<#@ import namespace="Microsoft.VisualStudio.TextTemplating" #>
+<#
+	//Write out the template file
+	PrepareDataToRender(this);
+	foreach (var item in Data) {
+		WriteLine(item.ToString());
+	}
+	WriteLine("");
+	WriteLine("module Db {");
+	foreach (var cls in Classes) {
+		if (!cls.ProjectItem.FileNames[0].Contains("Models.cs")) continue;
+		if (cls.Name.Contains("OrderDb")) continue;
+		WriteLine("");
+		WriteLine("\texport class " + cls.Name + " {");
+		foreach (var prop in cls.Members.OfType<CodeProperty2>()) {
+			var type = GetType(prop.Type.AsString);
+			if (type == null) continue;
+			WriteLine("\t\t" + prop.Name + ": " + type + ";");
+		}
+		WriteLine("\t}");
+	}
+	WriteLine("");
+	WriteLine("}");
+#>
+<#+
+
+//These functions process the project to find all the classes
+static DTE Dte;
+static Project Project;
+static List<Object> Data = new List<Object>();
+static List<CodeClass2> Classes = new List<CodeClass2>();
+
+void PrepareDataToRender(TextTransformation tt) {
+
+	// Get the DTE service from the host
+	var serviceProvider = Host as IServiceProvider;
+	if (serviceProvider != null) {
+		Dte = serviceProvider.GetService(typeof(SDTE)) as DTE;
+	}
+
+	// Fail if we couldn't get the DTE. This can happen when trying to run in TextTransform.exe
+	if (Dte == null) {
+		throw new Exception("T4MVC can only execute through the Visual Studio host");
+	}
+
+	Project = GetProjectContainingT4File(Dte);
+
+	if (Project == null) {
+		Error("Could not find the VS Project containing the T4 file.");
+		return;
+	}
+
+	ProcessItems(Project.ProjectItems);
+}
+
+Project GetProjectContainingT4File(DTE dte) {
+
+	// Find the .tt file's ProjectItem
+	ProjectItem projectItem = dte.Solution.FindProjectItem(Host.TemplateFile);
+
+	// If the .tt file is not opened, open it
+	if (projectItem.Document == null)
+		projectItem.Open(Constants.vsViewKindCode);
+
+	return projectItem.ContainingProject;
+}
+
+void ProcessItems(ProjectItems items) {
+	if (items == null) return;
+	foreach (ProjectItem item in items) {
+		ProcessItem(item);
+		ProcessItems(item.ProjectItems);
+	}
+}
+
+void ProcessItem(ProjectItem projectItem) {
+	//try {
+		if (projectItem.FileCodeModel == null) 
+			return;
+		//Data.Add(projectItem.Name);
+		ProcessElements(projectItem.FileCodeModel.CodeElements);
+	//} catch {}
+}
+
+void ProcessElements(CodeElements elements) {
+	foreach (CodeElement e in elements) {
+		try {
+			if (e is CodeClass2) {
+				//Data.Add(e.Name);
+				Classes.Add((CodeClass2)e);
+			}
+			ProcessElements(e.Children);
+		} catch {}
+	}
+}
+
+string GetType(string name) {
+	switch (name) {
+		case "int": return "number";
+		case "decimal": return "number";
+		case "string": return "string";
+		case "System.DateTime": return "any";
+		case "bool": return "bool";
+	}
+	if (name.Contains("List<")) {
+		var start = name.IndexOf("<") + 1;
+		var type = name.Substring(start, name.IndexOf(">") - start);
+		return CleanTypeName(type) + "[]";
+	}
+	return null;
+}
+
+string CleanTypeName(string name) {
+	return name.Split('.').Last();
+}
+
+#>
